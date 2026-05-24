@@ -17,7 +17,6 @@ dist/
 *.egg-info/
 
 # Local experiment output
-results/
 .tmp/
 
 # Editor and OS files
