@@ -109,7 +109,7 @@ def main() -> None:
 
     _print_tables(rows)
 
-    if args.csv is not None:
+    if args.csv is not None and rows:
         args.csv.parent.mkdir(parents=True, exist_ok=True)
         with args.csv.open("w", newline="", encoding="utf-8") as handle:
             writer = csv.DictWriter(handle, fieldnames=list(rows[0]))

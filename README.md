@@ -1,21 +1,27 @@
 # Nesterov Smoothing in Python
 
-This repository contains a Python implementation of the smoothing and accelerated minimization ideas from:
+This repository contains a focused Python implementation of the method from:
 
 Y. Nesterov, "Smooth minimization of non-smooth functions," *Mathematical Programming* 103(1), 127-152, 2005.
 
-The project currently includes:
+The codebase has been trimmed to the paper-aligned pieces only:
 
-- A generic finite-max smoothing solver in [nesterov_smoothing.py](nesterov_smoothing.py)
-- A paper-specific matrix-game experiment runner in [reproduce_nesterov_2005.py](reproduce_nesterov_2005.py)
-- Unit tests in [test_nesterov_smoothing.py](test_nesterov_smoothing.py)
+- the entropy-smoothed max-affine solver
+- the simplex geometry used in the paper
+- the Section 6 matrix-game reproduction
+
+Removed from the project:
+
+- `L∞` regression experiments
+- adaptive / changing-`mu` continuation variants
+- extra non-paper experiment scripts
 
 ## Project layout
 
 ```text
 .
-|-- .venv/
 |-- nesterov_smoothing.py
+|-- nesterov_smoothing_lib/
 |-- reproduce_nesterov_2005.py
 |-- requirements.txt
 |-- test_nesterov_smoothing.py
@@ -25,8 +31,6 @@ The project currently includes:
 ## Setup
 
 ### PowerShell
-
-Create and activate the virtual environment:
 
 ```powershell
 py -3 -m venv .venv
@@ -59,13 +63,13 @@ python -m unittest -v
 
 ## Quick examples
 
-Run the demo from the main solver module:
+Run the small demo from the main module:
 
 ```powershell
 python nesterov_smoothing.py
 ```
 
-Run a small matrix-game reproduction:
+Run one Section 6 matrix-game instance:
 
 ```powershell
 python reproduce_nesterov_2005.py --eps 0.01 --m-values 100 --n-values 100
@@ -77,7 +81,7 @@ Run the full Section 6 grid:
 python reproduce_nesterov_2005.py
 ```
 
-Save the results to CSV:
+Save the Section 6 results to CSV:
 
 ```powershell
 python reproduce_nesterov_2005.py --csv results/section6.csv
@@ -85,8 +89,9 @@ python reproduce_nesterov_2005.py --csv results/section6.csv
 
 ## Notes
 
-- The default experiment grid can take a long time. On this machine, the full run is on the order of hours rather than minutes.
-- The implementation focuses on the finite-max structure and the matrix-game experiments described in the paper.
+- The matrix-game solver uses the paper's fixed smoothing choice `mu = epsilon / (2 log m)`.
+- The default experiment grid can take a long time on larger instances.
+- `nesterov_smoothing.py` is a convenience shim over the `nesterov_smoothing_lib` package.
 - `unittest` is part of the Python standard library, so only `numpy` is listed in `requirements.txt`.
 
 ## Reference
