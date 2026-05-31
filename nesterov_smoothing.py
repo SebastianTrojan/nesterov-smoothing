@@ -32,6 +32,13 @@ from nesterov_piecewise_linear import (
     run_piecewise_linear_grid,
     solve_piecewise_linear_max_abs,
 )
+from nesterov_sum_absolute import (
+    SumAbsoluteExperimentCell,
+    SumAbsoluteResult,
+    run_sum_absolute_grid,
+    solve_sum_absolute_values,
+    sum_absolute_default_grid,
+)
 
 _project_to_l2_ball = project_to_l2_ball
 _project_to_simplex = project_to_simplex
@@ -48,6 +55,8 @@ __all__ = [
     "PaperMatrixGameResult",
     "PiecewiseLinearExperimentCell",
     "PiecewiseLinearResult",
+    "SumAbsoluteExperimentCell",
+    "SumAbsoluteResult",
     "_project_to_l2_ball",
     "_project_to_simplex",
     "_simplex_entropy_argmin",
@@ -55,16 +64,19 @@ __all__ = [
     "continuous_location_default_grid",
     "paper_section6_grid",
     "piecewise_linear_default_grid",
+    "sum_absolute_default_grid",
     "project_to_l2_ball",
     "project_to_simplex",
     "run_continuous_location_grid",
     "run_paper_matrix_game_grid",
     "run_piecewise_linear_grid",
+    "run_sum_absolute_grid",
     "simplex_entropy_argmin",
     "simplex_l1_squared_step",
     "solve_continuous_location",
     "solve_paper_matrix_game",
     "solve_piecewise_linear_max_abs",
+    "solve_sum_absolute_values",
 ]
 
 
@@ -102,6 +114,20 @@ def _demo() -> None:
     print("Center x   :", piecewise_result.x)
     print("Value      :", piecewise_result.objective_value)
     print("Gap        :", piecewise_result.gap)
+
+    sum_abs_result = solve_sum_absolute_values(
+        piecewise_A,
+        piecewise_b,
+        epsilon=1.0e-1,
+        radius=1.0,
+        check_frequency=10,
+    )
+    print("\nSum of absolute values demo")
+    print("Iterations :", sum_abs_result.iterations)
+    print("Predicted  :", sum_abs_result.predicted_iterations)
+    print("Center x   :", sum_abs_result.x)
+    print("Value      :", sum_abs_result.objective_value)
+    print("Gap        :", sum_abs_result.gap)
 
 
 if __name__ == "__main__":

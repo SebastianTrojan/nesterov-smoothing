@@ -12,9 +12,11 @@ from nesterov_smoothing import (
     run_continuous_location_grid,
     run_paper_matrix_game_grid,
     run_piecewise_linear_grid,
+    run_sum_absolute_grid,
     solve_continuous_location,
     solve_paper_matrix_game,
     solve_piecewise_linear_max_abs,
+    solve_sum_absolute_values,
 )
 
 
@@ -198,6 +200,51 @@ class NesterovSmoothingTests(unittest.TestCase):
         b = np.array([0.5, 0.5], dtype=np.float64)
 
         result = solve_piecewise_linear_max_abs(
+            A,
+            b,
+            epsilon=2.0e-1,
+            radius=2.0,
+            check_frequency=5,
+            continuation=ContinuationConfig(start_factor=2.0, decay=0.5, max_stages=3),
+        )
+
+        self.assertTrue(result.converged)
+        self.assertGreaterEqual(len(result.continuation_stages), 1)
+        self.assertLessEqual(result.gap, 2.0e-1)
+
+    def test_sum_absolute_solver_reaches_target_gap(self) -> None:
+        A = np.array([[1.0], [-1.0]], dtype=np.float64)
+        b = np.array([0.5, 0.5], dtype=np.float64)
+
+        result = solve_sum_absolute_values(A, b, epsilon=2.0e-1, radius=2.0, check_frequency=5)
+
+        self.assertTrue(result.converged)
+        self.assertLessEqual(result.gap, 2.0e-1)
+        self.assertLessEqual(float(np.linalg.norm(result.x)), 2.0 + 1.0e-12)
+        np.testing.assert_allclose(np.max(np.abs(result.u)), 1.0, atol=1.0e-10)
+        self.assertGreater(result.predicted_iterations, 0)
+
+    def test_sum_absolute_grid_smoke(self) -> None:
+        cells = run_sum_absolute_grid(
+            base_seed=0,
+            epsilons=(2.0e-1,),
+            m_values=(4,),
+            n_values=(2,),
+            radius=1.0,
+            check_frequency=5,
+        )
+
+        self.assertEqual(len(cells), 1)
+        cell = cells[0]
+        self.assertTrue(cell.converged)
+        self.assertGreater(cell.iterations, 0)
+        self.assertGreater(cell.predicted_iterations, 0)
+
+    def test_sum_absolute_continuation_smoke(self) -> None:
+        A = np.array([[1.0], [-1.0]], dtype=np.float64)
+        b = np.array([0.5, 0.5], dtype=np.float64)
+
+        result = solve_sum_absolute_values(
             A,
             b,
             epsilon=2.0e-1,

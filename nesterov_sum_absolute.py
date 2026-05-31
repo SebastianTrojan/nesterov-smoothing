@@ -1,0 +1,344 @@
+from __future__ import annotations
+
+import math
+from dataclasses import dataclass
+
+import numpy as np
+from numpy.typing import ArrayLike
+
+from nesterov_core import (
+    ContinuationConfig,
+    ContinuationStage,
+    FloatArray,
+    OracleState,
+    default_check_frequency,
+    matrix,
+    optimization_iterations_for_target,
+    predicted_iterations,
+    project_to_l2_ball,
+    run_accelerated_method,
+    vector,
+)
+
+
+@dataclass
+class SumAbsoluteResult:
+    x: FloatArray
+    u: FloatArray
+    objective_value: float
+    dual_value: float
+    gap: float
+    smoothed_value: float
+    iterations: int
+    predicted_iterations: int
+    mu: float
+    lipschitz: float
+    operator_norm: float
+    radius: float
+    check_frequency: int
+    converged: bool
+    elapsed_seconds: float
+    continuation_stages: tuple[ContinuationStage, ...] = ()
+
+
+@dataclass
+class SumAbsoluteExperimentCell:
+    epsilon: float
+    m: int
+    n: int
+    radius: float
+    iterations: int
+    predicted_iterations: int
+    percent_of_predicted: float
+    objective_value: float
+    dual_value: float
+    gap: float
+    mu: float
+    lipschitz: float
+    operator_norm: float
+    converged: bool
+    elapsed_seconds: float
+    mu_mode: str
+    stages: int
+
+
+def _rounded_stage_iterations(predicted: int, check_frequency: int) -> int:
+    return int(math.ceil(predicted / check_frequency) * check_frequency)
+
+
+def _sum_absolute_oracle(A: FloatArray, b: FloatArray, x: FloatArray, mu: float) -> OracleState:
+    residuals = A @ x - b
+    clipped = np.clip(residuals / mu, -1.0, 1.0)
+    abs_residuals = np.abs(residuals)
+    smoothed_terms = np.where(
+        abs_residuals <= mu,
+        0.5 * residuals * residuals / mu,
+        abs_residuals - 0.5 * mu,
+    )
+    return OracleState(
+        smoothed_value=float(np.sum(smoothed_terms)),
+        gradient=A.T @ clipped,
+        objective_value=float(np.sum(abs_residuals)),
+        auxiliary=clipped,
+    )
+
+
+def _sum_absolute_dual_value(A: FloatArray, b: FloatArray, dual: FloatArray, radius: float) -> float:
+    return float(-(b @ dual) - radius * np.linalg.norm(A.T @ dual))
+
+
+def solve_sum_absolute_values(
+    A: ArrayLike,
+    b: ArrayLike,
+    epsilon: float,
+    *,
+    radius: float = 1.0,
+    check_frequency: int | None = None,
+    max_iterations: int | None = None,
+    continuation: ContinuationConfig | None = None,
+    monotone_y: bool = False,
+) -> SumAbsoluteResult:
+    matrix_value = matrix(A, name="A")
+    offset_vector = vector(b, name="b")
+    if epsilon <= 0.0:
+        raise ValueError("epsilon must be positive.")
+    if radius <= 0.0:
+        raise ValueError("radius must be positive.")
+
+    m, n = matrix_value.shape
+    if offset_vector.size != m:
+        raise ValueError("b must have one entry per row of A.")
+    if m < 1 or n < 1:
+        raise ValueError("A must have positive dimensions.")
+
+    operator_norm = float(np.linalg.norm(matrix_value, ord=2))
+    primal_diameter = 0.5 * radius * radius
+    dual_diameter = 0.5 * float(m)
+    mu = epsilon / float(m)
+    lipschitz = (operator_norm ** 2) / mu if operator_norm > 0.0 else 0.0
+    predicted = predicted_iterations(operator_norm, primal_diameter, dual_diameter, epsilon)
+
+    if check_frequency is None:
+        check_frequency = min(default_check_frequency(epsilon), predicted)
+    if check_frequency <= 0:
+        raise ValueError("check_frequency must be positive.")
+
+    initial_x = np.zeros(n, dtype=np.float64)
+    if continuation is None:
+        if max_iterations is None:
+            max_iterations = _rounded_stage_iterations(predicted, check_frequency)
+        if max_iterations < 1:
+            raise ValueError("max_iterations must be positive.")
+
+        snapshot = run_accelerated_method(
+            initial_x=initial_x,
+            lipschitz=lipschitz,
+            max_iterations=max_iterations,
+            check_frequency=check_frequency,
+            oracle=lambda x: _sum_absolute_oracle(matrix_value, offset_vector, x, mu),
+            local_step=lambda x, gradient, L: project_to_l2_ball(x - gradient / L, radius),
+            aggregate_step=lambda gradient_sum, L: project_to_l2_ball(-gradient_sum / L, radius),
+            should_stop=lambda current: (
+                _sum_absolute_dual_value(matrix_value, offset_vector, current.auxiliary_average, radius)
+                if current.auxiliary_average is not None
+                else -math.inf
+            ) >= current.state.objective_value - epsilon,
+            monotone_y=monotone_y,
+        )
+
+        if snapshot.auxiliary_average is None:
+            raise RuntimeError("Sum-of-absolute-values result requires averaged dual weights.")
+
+        dual_value = _sum_absolute_dual_value(matrix_value, offset_vector, snapshot.auxiliary_average, radius)
+        gap = snapshot.state.objective_value - dual_value
+        return SumAbsoluteResult(
+            x=snapshot.y.copy(),
+            u=snapshot.auxiliary_average.copy(),
+            objective_value=snapshot.state.objective_value,
+            dual_value=dual_value,
+            gap=gap,
+            smoothed_value=snapshot.state.smoothed_value,
+            iterations=snapshot.iteration,
+            predicted_iterations=predicted,
+            mu= mu,
+            lipschitz=lipschitz,
+            operator_norm=operator_norm,
+            radius=radius,
+            check_frequency=check_frequency,
+            converged=gap <= epsilon,
+            elapsed_seconds=snapshot.elapsed_seconds,
+        )
+
+    current_x = initial_x
+    current_mu = continuation.start_factor * mu
+    total_iterations = 0
+    total_elapsed = 0.0
+    stages: list[ContinuationStage] = []
+    latest_snapshot = None
+    latest_dual_value = -math.inf
+    latest_gap = math.inf
+    latest_lipschitz = lipschitz
+
+    stage_index = 0
+    while True:
+        stage_index += 1
+        current_mu = max(mu, current_mu)
+        final_stage = current_mu <= mu * (1.0 + 1.0e-15)
+        latest_lipschitz = (operator_norm ** 2) / current_mu if operator_norm > 0.0 else 0.0
+        stage_target = epsilon if final_stage else continuation.stage_factor * current_mu * dual_diameter
+
+        if max_iterations is None:
+            stage_predicted = optimization_iterations_for_target(
+                lipschitz=latest_lipschitz,
+                primal_diameter=primal_diameter,
+                target=stage_target,
+            )
+            stage_iterations = _rounded_stage_iterations(stage_predicted, check_frequency)
+        else:
+            remaining_iterations = max_iterations - total_iterations
+            if remaining_iterations < 1:
+                break
+            stage_iterations = remaining_iterations
+
+        snapshot = run_accelerated_method(
+            initial_x=current_x,
+            lipschitz=latest_lipschitz,
+            max_iterations=stage_iterations,
+            check_frequency=check_frequency,
+            oracle=lambda x, current_mu=current_mu: _sum_absolute_oracle(matrix_value, offset_vector, x, current_mu),
+            local_step=lambda x, gradient, L: project_to_l2_ball(x - gradient / L, radius),
+            aggregate_step=lambda gradient_sum, L: project_to_l2_ball(-gradient_sum / L, radius),
+            should_stop=lambda current, stage_target=stage_target: (
+                _sum_absolute_dual_value(matrix_value, offset_vector, current.auxiliary_average, radius)
+                if current.auxiliary_average is not None
+                else -math.inf
+            ) >= current.state.objective_value - stage_target,
+            monotone_y=monotone_y,
+        )
+        if snapshot.auxiliary_average is None:
+            raise RuntimeError("Sum-of-absolute-values result requires averaged dual weights.")
+
+        latest_snapshot = snapshot
+        current_x = snapshot.y.copy()
+        total_iterations += snapshot.iteration
+        total_elapsed += snapshot.elapsed_seconds
+        latest_dual_value = _sum_absolute_dual_value(matrix_value, offset_vector, snapshot.auxiliary_average, radius)
+        latest_gap = snapshot.state.objective_value - latest_dual_value
+        target_met = latest_gap <= stage_target
+        stages.append(
+            ContinuationStage(
+                index=stage_index,
+                mu=current_mu,
+                target_value=stage_target,
+                achieved_value=latest_gap,
+                iterations=snapshot.iteration,
+                cumulative_iterations=total_iterations,
+                target_met=target_met,
+                final_stage=final_stage,
+            )
+        )
+
+        if latest_gap <= epsilon:
+            break
+        if final_stage:
+            break
+        if continuation.max_stages is not None and stage_index >= continuation.max_stages:
+            break
+        if max_iterations is not None and total_iterations >= max_iterations:
+            break
+        if not target_met:
+            break
+
+        current_mu = continuation.decay * current_mu
+
+    if latest_snapshot is None or latest_snapshot.auxiliary_average is None:
+        raise RuntimeError("Continuation did not produce a sum-of-absolute-values snapshot.")
+
+    return SumAbsoluteResult(
+        x=latest_snapshot.y.copy(),
+        u=latest_snapshot.auxiliary_average.copy(),
+        objective_value=latest_snapshot.state.objective_value,
+        dual_value=latest_dual_value,
+        gap=latest_gap,
+        smoothed_value=latest_snapshot.state.smoothed_value,
+        iterations=total_iterations,
+        predicted_iterations=predicted,
+        mu=mu,
+        lipschitz=latest_lipschitz,
+        operator_norm=operator_norm,
+        radius=radius,
+        check_frequency=check_frequency,
+        converged=latest_gap <= epsilon,
+        elapsed_seconds=total_elapsed,
+        continuation_stages=tuple(stages),
+    )
+
+
+def sum_absolute_default_grid() -> dict[float, dict[str, tuple[int, ...] | float]]:
+    return {
+        1.0e-2: {"m_values": (100, 300), "n_values": (50, 200), "radius": 1.0},
+        1.0e-3: {"m_values": (100, 300), "n_values": (50, 200), "radius": 1.0},
+        1.0e-4: {"m_values": (100, 300), "n_values": (50, 200), "radius": 1.0},
+    }
+
+
+def run_sum_absolute_grid(
+    *,
+    base_seed: int = 0,
+    epsilons: tuple[float, ...] | None = None,
+    m_values: tuple[int, ...] | None = None,
+    n_values: tuple[int, ...] | None = None,
+    radius: float | None = None,
+    check_frequency: int | None = None,
+    max_iterations: int | None = None,
+    continuation: ContinuationConfig | None = None,
+    monotone_y: bool = False,
+) -> list[SumAbsoluteExperimentCell]:
+    default_grid = sum_absolute_default_grid()
+    active_epsilons = tuple(default_grid) if epsilons is None else epsilons
+    cells: list[SumAbsoluteExperimentCell] = []
+
+    for epsilon in active_epsilons:
+        epsilon_m_values = default_grid[epsilon]["m_values"] if m_values is None else m_values
+        epsilon_n_values = default_grid[epsilon]["n_values"] if n_values is None else n_values
+        epsilon_radius = float(default_grid[epsilon]["radius"]) if radius is None else radius
+
+        for m in epsilon_m_values:
+            for n in epsilon_n_values:
+                seed = hash((base_seed, epsilon, m, n, epsilon_radius)) & 0xFFFFFFFF
+                rng = np.random.default_rng(seed)
+                matrix_value = rng.uniform(-1.0, 1.0, size=(m, n))
+                offsets = rng.uniform(-1.0, 1.0, size=m)
+                result = solve_sum_absolute_values(
+                    matrix_value,
+                    offsets,
+                    epsilon,
+                    radius=epsilon_radius,
+                    check_frequency=check_frequency,
+                    max_iterations=max_iterations,
+                    continuation=continuation,
+                    monotone_y=monotone_y,
+                )
+                cells.append(
+                    SumAbsoluteExperimentCell(
+                        epsilon=epsilon,
+                        m=m,
+                        n=n,
+                        radius=epsilon_radius,
+                        iterations=result.iterations,
+                        predicted_iterations=result.predicted_iterations,
+                        percent_of_predicted=100.0 * result.iterations / result.predicted_iterations,
+                        objective_value=result.objective_value,
+                        dual_value=result.dual_value,
+                        gap=result.gap,
+                        mu=result.mu,
+                        lipschitz=result.lipschitz,
+                        operator_norm=result.operator_norm,
+                        converged=result.converged,
+                        elapsed_seconds=result.elapsed_seconds,
+                        mu_mode="continuation" if continuation is not None else "fixed",
+                        stages=max(1, len(result.continuation_stages)),
+                    )
+                )
+
+    return cells

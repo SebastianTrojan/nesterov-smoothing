@@ -10,6 +10,7 @@ The code stays flat at the project root. It is not a package, but the logic is n
 - matrix game: [nesterov_matrix_game.py](nesterov_matrix_game.py)
 - continuous location: [nesterov_continuous_location.py](nesterov_continuous_location.py)
 - piece-wise linear optimization: [nesterov_piecewise_linear.py](nesterov_piecewise_linear.py)
+- sum of absolute values: [nesterov_sum_absolute.py](nesterov_sum_absolute.py)
 - public entry file: [nesterov_smoothing.py](nesterov_smoothing.py)
 
 The project currently implements:
@@ -17,6 +18,7 @@ The project currently implements:
 - the matrix-game example from Sections 4.1 and 6
 - the continuous location example from Section 4.2
 - the piece-wise linear optimization example from Section 4.4.1
+- the sum-of-absolute-values example from the paper's piece-wise linear discussion
 - the shared accelerated scheme from Section 3
 
 ## Project layout
@@ -27,10 +29,12 @@ The project currently implements:
 |-- nesterov_core.py
 |-- nesterov_matrix_game.py
 |-- nesterov_piecewise_linear.py
+|-- nesterov_sum_absolute.py
 |-- nesterov_smoothing.py
 |-- reproduce_continuous_location.py
 |-- reproduce_nesterov_2005.py
 |-- reproduce_piecewise_linear.py
+|-- reproduce_sum_absolute.py
 |-- requirements.txt
 |-- test_nesterov_smoothing.py
 `-- README.md
@@ -161,9 +165,36 @@ Save the piece-wise linear runs to CSV:
 python reproduce_piecewise_linear.py --csv results/piecewise_linear.csv
 ```
 
+## Sum of absolute values example
+
+Run the small built-in grid:
+
+```powershell
+python reproduce_sum_absolute.py
+```
+
+Run one specific case:
+
+```powershell
+python reproduce_sum_absolute.py --eps 0.1 --m-values 10 --n-values 5 --radius 1.0
+```
+
+Run it with changing `mu`:
+
+```powershell
+python reproduce_sum_absolute.py --eps 0.1 --m-values 10 --n-values 5 --radius 1.0 --continuation
+```
+
+Save the sum-of-absolute-values runs to CSV:
+
+```powershell
+python reproduce_sum_absolute.py --csv results/sum_absolute.csv
+```
+
 ## Notes
 
 - The matrix-game and piece-wise linear examples both use entropy smoothing of a max-affine structure.
+- The sum-of-absolute-values example uses quadratic smoothing of the `L1` objective's box-dual form.
 - The continuous-location example uses quadratic smoothing of Euclidean distances.
 - All three scripts support an optional continuation mode with `--continuation`, `--mu-start-factor`, `--mu-decay`, `--stage-factor`, and `--max-stages`.
 - All three scripts also support the paper's monotone `y_k` acceptance rule through `--monotone-y`.
