@@ -2,6 +2,7 @@ from __future__ import annotations
 
 import math
 from dataclasses import dataclass
+from typing import Callable
 
 import numpy as np
 from numpy.typing import ArrayLike
@@ -10,7 +11,11 @@ from nesterov_core import (
     ContinuationConfig,
     ContinuationStage,
     FloatArray,
+    GapTracePoint,
+    MuGapPoint,
+    continuation_mu_gap_history,
     default_check_frequency,
+    fixed_mu_gap_history,
     matrix,
     max_affine_entropy_oracle,
     optimization_iterations_for_target,
@@ -38,6 +43,7 @@ class PiecewiseLinearResult:
     converged: bool
     elapsed_seconds: float
     continuation_stages: tuple[ContinuationStage, ...] = ()
+    mu_gap_history: tuple[MuGapPoint, ...] = ()
 
 
 @dataclass
@@ -85,6 +91,7 @@ def solve_piecewise_linear_max_abs(
     max_iterations: int | None = None,
     continuation: ContinuationConfig | None = None,
     monotone_y: bool = False,
+    trace_callback: Callable[[GapTracePoint], None] | None = None,
 ) -> PiecewiseLinearResult:
     matrix_value = matrix(A, name="A")
     offset_vector = vector(b, name="b")
@@ -115,11 +122,43 @@ def solve_piecewise_linear_max_abs(
         raise ValueError("check_frequency must be positive.")
 
     initial_x = np.zeros(n, dtype=np.float64)
+
+    def emit_trace(
+        *,
+        iteration: int,
+        stage: int,
+        mu_value: float,
+        objective_value: float,
+        dual_weights: FloatArray | None,
+    ) -> None:
+        if trace_callback is None or dual_weights is None:
+            return
+        dual_value = _piecewise_linear_dual_value(pieces_A, offsets, dual_weights, radius)
+        trace_callback(
+            GapTracePoint(
+                iteration=iteration,
+                stage=stage,
+                mu=mu_value,
+                objective_value=objective_value,
+                dual_value=dual_value,
+                gap=objective_value - dual_value,
+            )
+        )
+
     if continuation is None:
         if max_iterations is None:
             max_iterations = _rounded_stage_iterations(predicted, check_frequency)
         if max_iterations < 1:
             raise ValueError("max_iterations must be positive.")
+
+        initial_state = max_affine_entropy_oracle(pieces_A, offsets, initial_x, mu)
+        emit_trace(
+            iteration=0,
+            stage=1,
+            mu_value=mu,
+            objective_value=initial_state.objective_value,
+            dual_weights=initial_state.auxiliary,
+        )
 
         snapshot = run_accelerated_method(
             initial_x=initial_x,
@@ -135,6 +174,13 @@ def solve_piecewise_linear_max_abs(
                 else -math.inf
             ) >= current.state.objective_value - epsilon,
             monotone_y=monotone_y,
+            on_checkpoint=lambda current: emit_trace(
+                iteration=current.iteration,
+                stage=1,
+                mu_value=mu,
+                objective_value=current.state.objective_value,
+                dual_weights=current.auxiliary_average,
+            ),
         )
 
         if snapshot.auxiliary_average is None:
@@ -157,6 +203,12 @@ def solve_piecewise_linear_max_abs(
             check_frequency=check_frequency,
             converged=gap <= epsilon,
             elapsed_seconds=snapshot.elapsed_seconds,
+            mu_gap_history=fixed_mu_gap_history(
+                mu=mu,
+                gap=gap,
+                target_value=epsilon,
+                iterations=snapshot.iteration,
+            ),
         )
 
     current_x = initial_x
@@ -176,6 +228,17 @@ def solve_piecewise_linear_max_abs(
         final_stage = current_mu <= mu * (1.0 + 1.0e-15)
         latest_lipschitz = (operator_norm ** 2) / current_mu if operator_norm > 0.0 else 0.0
         stage_target = epsilon if final_stage else continuation.stage_factor * current_mu * dual_diameter
+        stage_offset = total_iterations
+
+        if trace_callback is not None and stage_offset == 0:
+            initial_state = max_affine_entropy_oracle(pieces_A, offsets, current_x, current_mu)
+            emit_trace(
+                iteration=0,
+                stage=stage_index,
+                mu_value=current_mu,
+                objective_value=initial_state.objective_value,
+                dual_weights=initial_state.auxiliary,
+            )
 
         if max_iterations is None:
             stage_predicted = optimization_iterations_for_target(
@@ -204,6 +267,13 @@ def solve_piecewise_linear_max_abs(
                 else -math.inf
             ) >= current.state.objective_value - stage_target,
             monotone_y=monotone_y,
+            on_checkpoint=lambda current, stage_offset=stage_offset, stage_index=stage_index, current_mu=current_mu: emit_trace(
+                iteration=stage_offset + current.iteration,
+                stage=stage_index,
+                mu_value=current_mu,
+                objective_value=current.state.objective_value,
+                dual_weights=current.auxiliary_average,
+            ),
         )
         if snapshot.auxiliary_average is None:
             raise RuntimeError("Piece-wise linear result requires averaged dual weights.")
@@ -260,6 +330,7 @@ def solve_piecewise_linear_max_abs(
         converged=latest_gap <= epsilon,
         elapsed_seconds=total_elapsed,
         continuation_stages=tuple(stages),
+        mu_gap_history=continuation_mu_gap_history(stages),
     )
 
 

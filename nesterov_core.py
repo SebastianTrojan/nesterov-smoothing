@@ -1,8 +1,10 @@
 from __future__ import annotations
 
+import csv
 import math
 import time
 from dataclasses import dataclass
+from pathlib import Path
 from typing import Callable
 
 import numpy as np
@@ -56,6 +58,90 @@ class ContinuationStage:
     cumulative_iterations: int
     target_met: bool
     final_stage: bool
+
+
+@dataclass(frozen=True)
+class MuGapPoint:
+    stage_index: int
+    mu: float
+    gap: float
+    target_value: float
+    iterations: int
+    cumulative_iterations: int
+    target_met: bool
+    final_stage: bool
+
+
+@dataclass(frozen=True)
+class GapTracePoint:
+    iteration: int
+    stage: int
+    mu: float
+    objective_value: float
+    dual_value: float
+    gap: float
+
+
+def fixed_mu_gap_history(*, mu: float, gap: float, target_value: float, iterations: int) -> tuple[MuGapPoint, ...]:
+    return (
+        MuGapPoint(
+            stage_index=1,
+            mu=mu,
+            gap=gap,
+            target_value=target_value,
+            iterations=iterations,
+            cumulative_iterations=iterations,
+            target_met=gap <= target_value,
+            final_stage=True,
+        ),
+    )
+
+
+def continuation_mu_gap_history(stages: list[ContinuationStage] | tuple[ContinuationStage, ...]) -> tuple[MuGapPoint, ...]:
+    return tuple(
+        MuGapPoint(
+            stage_index=stage.index,
+            mu=stage.mu,
+            gap=stage.achieved_value,
+            target_value=stage.target_value,
+            iterations=stage.iterations,
+            cumulative_iterations=stage.cumulative_iterations,
+            target_met=stage.target_met,
+            final_stage=stage.final_stage,
+        )
+        for stage in stages
+    )
+
+
+def save_mu_gap_history_csv(path: str | Path, history: list[MuGapPoint] | tuple[MuGapPoint, ...]) -> None:
+    output_path = Path(path)
+    output_path.parent.mkdir(parents=True, exist_ok=True)
+    fieldnames = [
+        "stage_index",
+        "mu",
+        "gap",
+        "target_value",
+        "iterations",
+        "cumulative_iterations",
+        "target_met",
+        "final_stage",
+    ]
+    with output_path.open("w", newline="", encoding="utf-8") as handle:
+        writer = csv.DictWriter(handle, fieldnames=fieldnames)
+        writer.writeheader()
+        for point in history:
+            writer.writerow(
+                {
+                    "stage_index": point.stage_index,
+                    "mu": point.mu,
+                    "gap": point.gap,
+                    "target_value": point.target_value,
+                    "iterations": point.iterations,
+                    "cumulative_iterations": point.cumulative_iterations,
+                    "target_met": point.target_met,
+                    "final_stage": point.final_stage,
+                }
+            )
 
 
 def vector(value: ArrayLike, *, name: str) -> FloatArray:
@@ -240,6 +326,7 @@ def run_accelerated_method(
     aggregate_step: Callable[[FloatArray, float], FloatArray],
     should_stop: Callable[[AcceleratedSnapshot], bool],
     monotone_y: bool = False,
+    on_checkpoint: Callable[[AcceleratedSnapshot], None] | None = None,
 ) -> AcceleratedSnapshot:
     x_current = initial_x.copy()
     gradient_sum = np.zeros_like(initial_x)
@@ -292,6 +379,8 @@ def run_accelerated_method(
                 elapsed_seconds=time.perf_counter() - started_at,
             )
             last_snapshot = snapshot
+            if on_checkpoint is not None:
+                on_checkpoint(snapshot)
             if should_stop(snapshot):
                 return snapshot
 

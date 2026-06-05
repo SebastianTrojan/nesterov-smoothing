@@ -191,6 +191,33 @@ Save the sum-of-absolute-values runs to CSV:
 python reproduce_sum_absolute.py --csv results/sum_absolute.csv
 ```
 
+## Epsilon scaling experiment
+
+To run the fixed-$\mu$ epsilon-scaling experiment for all four problems, use:
+
+```powershell
+python experiments/run_epsilon_scaling.py --output-dir results --overwrite
+```
+
+This experiment:
+
+- uses the fixed paper-style smoothing parameter only,
+- does not use continuation,
+- reuses one random instance per seed across all epsilon values,
+- runs seeds `0, 1, 2, 3, 4`,
+- tests epsilon values `1e-1, 5e-2, 1e-2, 5e-3, 1e-3, 5e-4, 1e-4`.
+
+It writes:
+
+- `results/epsilon_scaling.csv`
+- `results/epsilon_scaling_summary.csv`
+- `results/epsilon_scaling_regression.csv`
+- `results/plots/epsilon_scaling_iterations_vs_inverse_epsilon.png`
+- `results/plots/epsilon_scaling_loglog.png`
+
+The regression file reports the estimated slope `p` in
+`log(iterations) = beta0 + p * log(1 / epsilon)`.
+
 ## Notes
 
 - The matrix-game and piece-wise linear examples both use entropy smoothing of a max-affine structure.
@@ -198,7 +225,8 @@ python reproduce_sum_absolute.py --csv results/sum_absolute.csv
 - The continuous-location example uses quadratic smoothing of Euclidean distances.
 - All three scripts support an optional continuation mode with `--continuation`, `--mu-start-factor`, `--mu-decay`, `--stage-factor`, and `--max-stages`.
 - All three scripts also support the paper's monotone `y_k` acceptance rule through `--monotone-y`.
-- Only `numpy` is required; `unittest` is built into Python.
+- `numpy` is required for the solvers, and `matplotlib` is required for the PNG plots created by the epsilon-scaling experiment.
+- `unittest` is built into Python.
 
 ## Reference
 

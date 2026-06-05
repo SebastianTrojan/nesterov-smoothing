@@ -2,6 +2,7 @@ from __future__ import annotations
 
 import math
 from dataclasses import dataclass
+from typing import Callable
 
 import numpy as np
 from numpy.typing import ArrayLike
@@ -10,8 +11,12 @@ from nesterov_core import (
     ContinuationConfig,
     ContinuationStage,
     FloatArray,
+    GapTracePoint,
+    MuGapPoint,
     OracleState,
+    continuation_mu_gap_history,
     default_check_frequency,
+    fixed_mu_gap_history,
     matrix,
     optimization_iterations_for_target,
     predicted_iterations,
@@ -41,6 +46,7 @@ class ContinuousLocationResult:
     converged: bool
     elapsed_seconds: float
     continuation_stages: tuple[ContinuationStage, ...] = ()
+    mu_gap_history: tuple[MuGapPoint, ...] = ()
 
 
 @dataclass
@@ -116,6 +122,7 @@ def solve_continuous_location(
     max_iterations: int | None = None,
     continuation: ContinuationConfig | None = None,
     monotone_y: bool = False,
+    trace_callback: Callable[[GapTracePoint], None] | None = None,
 ) -> ContinuousLocationResult:
     city_matrix = matrix(cities, name="cities")
     if epsilon <= 0.0:
@@ -150,11 +157,43 @@ def solve_continuous_location(
         raise ValueError("check_frequency must be positive.")
 
     initial_x = np.zeros(dimension, dtype=np.float64)
+
+    def emit_trace(
+        *,
+        iteration: int,
+        stage: int,
+        mu_value: float,
+        objective_value: float,
+        dual_points_flat: FloatArray | None,
+    ) -> None:
+        if trace_callback is None or dual_points_flat is None:
+            return
+        dual_value = _continuous_location_dual_value(city_matrix, weight_vector, dual_points_flat, radius)
+        trace_callback(
+            GapTracePoint(
+                iteration=iteration,
+                stage=stage,
+                mu=mu_value,
+                objective_value=objective_value,
+                dual_value=dual_value,
+                gap=objective_value - dual_value,
+            )
+        )
+
     if continuation is None:
         if max_iterations is None:
             max_iterations = int(math.ceil(predicted / check_frequency) * check_frequency)
         if max_iterations < 1:
             raise ValueError("max_iterations must be positive.")
+
+        initial_state = _continuous_location_oracle(city_matrix, weight_vector, initial_x, mu)
+        emit_trace(
+            iteration=0,
+            stage=1,
+            mu_value=mu,
+            objective_value=initial_state.objective_value,
+            dual_points_flat=initial_state.auxiliary,
+        )
 
         snapshot = run_accelerated_method(
             initial_x=initial_x,
@@ -170,6 +209,13 @@ def solve_continuous_location(
                 else -math.inf
             ) >= current.state.objective_value - epsilon,
             monotone_y=monotone_y,
+            on_checkpoint=lambda current: emit_trace(
+                iteration=current.iteration,
+                stage=1,
+                mu_value=mu,
+                objective_value=current.state.objective_value,
+                dual_points_flat=current.auxiliary_average,
+            ),
         )
         if snapshot.auxiliary_average is None:
             raise RuntimeError("Continuous-location result requires averaged dual points.")
@@ -200,6 +246,12 @@ def solve_continuous_location(
             check_frequency=check_frequency,
             converged=gap <= epsilon,
             elapsed_seconds=snapshot.elapsed_seconds,
+            mu_gap_history=fixed_mu_gap_history(
+                mu=mu,
+                gap=gap,
+                target_value=epsilon,
+                iterations=snapshot.iteration,
+            ),
         )
 
     current_x = initial_x
@@ -220,6 +272,17 @@ def solve_continuous_location(
         final_stage = current_mu <= mu * (1.0 + 1.0e-15)
         latest_lipschitz = weight_sum / current_mu
         stage_target = epsilon if final_stage else continuation.stage_factor * current_mu * dual_diameter
+        stage_offset = total_iterations
+
+        if trace_callback is not None and stage_offset == 0:
+            initial_state = _continuous_location_oracle(city_matrix, weight_vector, current_x, current_mu)
+            emit_trace(
+                iteration=0,
+                stage=stage_index,
+                mu_value=current_mu,
+                objective_value=initial_state.objective_value,
+                dual_points_flat=initial_state.auxiliary,
+            )
 
         if max_iterations is None:
             stage_predicted = optimization_iterations_for_target(
@@ -248,6 +311,13 @@ def solve_continuous_location(
                 else -math.inf
             ) >= current.state.objective_value - stage_target,
             monotone_y=monotone_y,
+            on_checkpoint=lambda current, stage_offset=stage_offset, stage_index=stage_index, current_mu=current_mu: emit_trace(
+                iteration=stage_offset + current.iteration,
+                stage=stage_index,
+                mu_value=current_mu,
+                objective_value=current.state.objective_value,
+                dual_points_flat=current.auxiliary_average,
+            ),
         )
         if snapshot.auxiliary_average is None:
             raise RuntimeError("Continuous-location result requires averaged dual points.")
@@ -314,6 +384,7 @@ def solve_continuous_location(
         converged=latest_gap <= epsilon,
         elapsed_seconds=total_elapsed,
         continuation_stages=tuple(stages),
+        mu_gap_history=continuation_mu_gap_history(stages),
     )
 
 

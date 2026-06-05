@@ -1,0 +1,1466 @@
+\documentclass[11pt]{article}
+
+\usepackage[a4paper,margin=2.5cm]{geometry}
+\usepackage{amsmath,amssymb,amsfonts}
+\usepackage{graphicx}
+\usepackage{booktabs}
+\usepackage{float}
+\usepackage{hyperref}
+\usepackage{caption}
+\usepackage{subcaption}
+
+
+
+\title{Nesterov Smoothing for Structured Non-Smooth Convex Optimization}
+\author{}
+\date{}
+
+\begin{document}
+
+\maketitle
+
+\begin{abstract}
+This report describes an implementation of Nesterov's smoothing technique for
+structured non-smooth convex optimization problems. The method replaces a
+non-smooth objective with a smooth approximation obtained by regularizing an
+auxiliary maximization problem, and then applies an accelerated first-order
+method. The implementation is tested on matrix games, the continuous location
+problem, and two piecewise-linear objectives: the maximum of absolute values and
+the sum of absolute values. The experiments study primal-dual gap convergence,
+the empirical dependence of the iteration count on the required accuracy, and a
+practical continuation strategy for changing the smoothing parameter.
+\end{abstract}
+
+\section{Theoretical Background}
+
+\subsection{Problem class}
+
+Nesterov's smoothing technique \cite{nesterov2005smooth} applies to a class of convex non-smooth
+optimization problems of the form
+\[
+    f^*=\min_{x\in Q_1} f(x),
+\]
+where \(Q_1\) is a closed convex feasible set and \(f\) is convex but may be
+non-smooth.
+
+The key assumption is that the non-smooth part of the objective can be written
+as a maximization over an auxiliary variable:
+\[
+    f(x)
+    =
+    \hat f(x)
+    +
+    \max_{u\in Q_2}
+    \left\{
+        \langle Ax,u\rangle-\hat\phi(u)
+    \right\}.
+\]
+Here \(Q_2\) is another closed convex set, \(A\) is a linear operator,
+\(\hat f\) is a smooth convex function, and \(\hat\phi\) is convex. The
+non-smoothness comes from the inner maximization over \(u\).
+
+The variable \(x\) is the primal variable. The variable \(u\) is an auxiliary
+or dual variable. For a fixed \(x\), the inner problem finds the worst or most
+active dual response.
+
+\subsection{Smoothing the inner maximization}
+
+The central idea is to replace the hard maximum by a smooth approximation.
+Choose a prox-function \(d_2(u)\) on \(Q_2\), strongly convex with parameter
+\(\sigma_2>0\), and define
+\[
+    D_2=\max_{u\in Q_2} d_2(u).
+\]
+For a smoothing parameter \(\mu>0\), define
+\[
+    f_\mu(x)
+    =
+    \max_{u\in Q_2}
+    \left\{
+        \langle Ax,u\rangle-\hat\phi(u)-\mu d_2(u)
+    \right\}.
+\]
+The extra term \(-\mu d_2(u)\) penalizes extreme choices of \(u\). This makes
+the inner maximization better behaved and makes the resulting function
+differentiable.
+
+The smoothed approximation satisfies the uniform error bound
+\[
+    f_\mu(x)\le f(x)\le f_\mu(x)+\mu D_2.
+\]
+Therefore,
+\[
+    0\le f(x)-f_\mu(x)\le \mu D_2.
+\]
+Thus smaller \(\mu\) gives a more accurate approximation of the original
+objective. However, smaller \(\mu\) also makes the smoothed objective harder to
+optimize.
+
+\subsection{Gradient of the smoothed objective}
+
+For each \(x\), define the smoothed inner maximizer
+\[
+    u_\mu(x)
+    =
+    \arg\max_{u\in Q_2}
+    \left\{
+        \langle Ax,u\rangle-\hat\phi(u)-\mu d_2(u)
+    \right\}.
+\]
+Nesterov shows that the smoothed function is differentiable and
+\[
+    \nabla f_\mu(x)=A^*u_\mu(x).
+\]
+In matrix notation this is usually \(A^\top u_\mu(x)\).
+
+If the smooth part \(\hat f\) is present, then
+\[
+    \nabla \bar f_\mu(x)
+    =
+    \nabla \hat f(x)+A^*u_\mu(x).
+\]
+The Lipschitz constant of this gradient is bounded by
+\[
+    L_\mu
+    =
+    M+\frac{\|A\|_{1,2}^2}{\mu\sigma_2},
+\]
+where \(M\) is the Lipschitz constant of \(\nabla \hat f\). In the examples
+implemented in this project, \(\hat f=0\), so \(M=0\).
+
+This formula shows the basic trade-off:
+\[
+    \mu\downarrow
+    \quad\Rightarrow\quad
+    \text{better approximation, but larger } L_\mu.
+\]
+
+\subsection{Accelerated minimization}
+
+After smoothing, the method minimizes the smooth problem
+\[
+    \min_{x\in Q_1} f_\mu(x).
+\]
+Let \(d_1(x)\) be a prox-function on \(Q_1\), strongly convex with parameter
+\(\sigma_1>0\), and define
+\[
+    D_1=\max_{x\in Q_1}d_1(x).
+\]
+
+The accelerated method maintains three sequences:
+\[
+    x_k,\qquad y_k,\qquad z_k.
+\]
+At iteration \(k\), compute
+\[
+    g_k=\nabla f_\mu(x_k).
+\]
+
+The local point is
+\[
+    y_k=T_{Q_1}(x_k),
+\]
+where
+\[
+    T_{Q_1}(x_k)
+    =
+    \arg\min_{y\in Q_1}
+    \left\{
+        \langle g_k,y-x_k\rangle
+        +
+        \frac{L}{2}\|y-x_k\|^2
+    \right\}.
+\]
+In Euclidean geometry this becomes the projected gradient step
+\[
+    y_k=
+    \operatorname{Proj}_{Q_1}
+    \left(
+        x_k-\frac{1}{L}g_k
+    \right).
+\]
+
+The method also accumulates previous gradients. With
+\[
+    \alpha_k=\frac{k+1}{2},
+\]
+define
+\[
+    G_k=\sum_{i=0}^k \alpha_i g_i.
+\]
+The aggregate point is
+\[
+    z_k
+    =
+    \arg\min_{x\in Q_1}
+    \left\{
+        \frac{L}{\sigma_1}d_1(x)+\langle G_k,x\rangle
+    \right\}.
+\]
+The point \(y_k\) is based on the current local gradient, while \(z_k\)
+summarizes all past gradient information.
+
+The next search point is obtained by mixing these two points:
+\[
+    x_{k+1}
+    =
+    \frac{2}{k+3}z_k
+    +
+    \frac{k+1}{k+3}y_k.
+\]
+This is the acceleration step.
+
+\subsection{Dual averaging and stopping criterion}
+
+At each iteration the method computes a smoothed dual response
+\[
+    u_k=u_\mu(x_k).
+\]
+The final dual candidate is a weighted average:
+\[
+    \hat u
+    =
+    \frac{\sum_{k=0}^N \alpha_k u_k}
+         {\sum_{k=0}^N \alpha_k}.
+\]
+Since \(Q_2\) is convex, \(\hat u\in Q_2\).
+
+The dual value is denoted by \(\phi(\hat u)\). Weak duality gives
+\[
+    \phi(\hat u)\le f^*\le f(\hat x),
+\]
+where \(\hat x\) is the final primal point. Therefore
+\[
+    f(\hat x)-\phi(\hat u)
+\]
+is a primal-dual gap. The algorithm stops when
+\[
+    f(\hat x)-\phi(\hat u)\le \varepsilon.
+\]
+This gives a certificate that \(\hat x\) is \(\varepsilon\)-optimal.
+
+\subsection{Complexity bound}
+
+For the considered class of problems, Nesterov proves a bound of the form
+\[
+    0
+    \le
+    f(\hat x)-\phi(\hat u)
+    \le
+    \frac{4\|A\|_{1,2}}{N+1}
+    \sqrt{
+        \frac{D_1D_2}{\sigma_1\sigma_2}
+    }
+    +
+    \frac{4MD_1}{\sigma_1(N+1)^2}.
+\]
+When \(\hat f=0\), we have \(M=0\), and the bound simplifies to
+\[
+    f(\hat x)-\phi(\hat u)
+    \le
+    \frac{4\|A\|_{1,2}}{N+1}
+    \sqrt{
+        \frac{D_1D_2}{\sigma_1\sigma_2}
+    }.
+\]
+Thus, to obtain accuracy \(\varepsilon\), it is sufficient to take
+\[
+    N+1
+    \ge
+    \frac{4\|A\|_{1,2}}{\varepsilon}
+    \sqrt{
+        \frac{D_1D_2}{\sigma_1\sigma_2}
+    }.
+\]
+Therefore, the theoretical iteration complexity is
+\[
+    N=O\left(\frac{1}{\varepsilon}\right).
+\]
+This improves over the classical subgradient rate \(O(1/\varepsilon^2)\) for
+this structured class of non-smooth problems.
+
+\section{Problem Classes}
+
+The examples considered below all fit the same general smoothing framework, but
+they use different feasible sets and prox-functions. The first two examples are
+matrix games and continuous location. The last two examples are both
+piecewise-linear objectives built from absolute residuals. They are reported
+separately because the maximum of absolute values uses an entropy smoothing over
+a simplex, while the sum of absolute values uses a separable Huber-type
+smoothing.
+
+\subsection{Matrix games}
+
+The matrix game problem is
+\[
+    \min_{x\in\Delta_n}
+    \max_{u\in\Delta_m}
+    u^\top A x,
+\]
+where \(A\in\mathbb{R}^{m\times n}\), and \(\Delta_n,\Delta_m\) are probability
+simplexes.
+
+For fixed \(x\),
+\[
+    \max_{u\in\Delta_m}u^\top A x
+    =
+    \max_j(Ax)_j.
+\]
+Hence the problem is equivalent to
+\[
+    \min_{x\in\Delta_n}\max_j(Ax)_j.
+\]
+
+The entropy prox-functions are
+\[
+    d_1(x)=\ln n+\sum_{i=1}^n x_i\ln x_i,
+\]
+and
+\[
+    d_2(u)=\ln m+\sum_{j=1}^m u_j\ln u_j.
+\]
+Thus
+\[
+    D_1=\ln n,\qquad D_2=\ln m.
+\]
+
+The smoothed objective is
+\[
+    f_\mu(x)
+    =
+    \mu\ln
+    \left(
+        \frac{1}{m}
+        \sum_{j=1}^m
+        \exp\left(\frac{(Ax)_j}{\mu}\right)
+    \right).
+\]
+The smoothed dual response is
+\[
+    u_j(x)
+    =
+    \frac{
+        \exp((Ax)_j/\mu)
+    }{
+        \sum_{\ell=1}^m\exp((Ax)_\ell/\mu)
+    }.
+\]
+The gradient is
+\[
+    \nabla f_\mu(x)=A^\top u(x).
+\]
+
+For a feasible dual strategy \(u\), the dual value is
+\[
+    \phi(u)=\min_i(A^\top u)_i.
+\]
+The primal-dual gap is
+\[
+    \max_j(Ax)_j-\min_i(A^\top u)_i.
+\]
+
+\subsection{Continuous location problem}
+
+The continuous location problem is
+\[
+    \min_{\|x\|_2\le r}
+    \sum_{j=1}^p w_j\|x-c_j\|_2.
+\]
+Here \(x\) is the facility location, \(c_j\) are city locations, and \(w_j>0\)
+are weights.
+
+Each norm can be written as
+\[
+    \|x-c_j\|_2
+    =
+    \max_{\|u_j\|_2\le1}
+    \langle x-c_j,u_j\rangle.
+\]
+Thus the dual variable is a collection
+\[
+    U=(u_1,\ldots,u_p),
+    \qquad
+    \|u_j\|_2\le1.
+\]
+
+The primal prox-function is
+\[
+    d_1(x)=\frac12\|x\|_2^2,
+\]
+so
+\[
+    D_1=\frac12r^2.
+\]
+Let
+\[
+    P=\sum_{j=1}^p w_j.
+\]
+Then
+\[
+    D_2=\frac12P.
+\]
+
+The smoothed distance is
+\[
+    \psi_\mu(t)
+    =
+    \begin{cases}
+        \dfrac{t^2}{2\mu}, & 0\le t\le \mu,\\[6pt]
+        t-\dfrac{\mu}{2}, & t>\mu.
+    \end{cases}
+\]
+Therefore
+\[
+    f_\mu(x)
+    =
+    \sum_{j=1}^p w_j\psi_\mu(\|x-c_j\|_2).
+\]
+
+The smoothed dual direction is
+\[
+    u_j(x)
+    =
+    \begin{cases}
+        \dfrac{x-c_j}{\mu}, & \|x-c_j\|_2\le \mu,\\[8pt]
+        \dfrac{x-c_j}{\|x-c_j\|_2}, & \|x-c_j\|_2>\mu.
+    \end{cases}
+\]
+The gradient is
+\[
+    \nabla f_\mu(x)=\sum_{j=1}^p w_j u_j(x).
+\]
+
+For a feasible \(U\), the dual value is
+\[
+    \phi(U)
+    =
+    -r
+    \left\|
+        \sum_{j=1}^p w_j u_j
+    \right\|_2
+    -
+    \sum_{j=1}^p w_j\langle c_j,u_j\rangle.
+\]
+The primal-dual gap is
+\[
+    \sum_{j=1}^p w_j\|x-c_j\|_2-\phi(U).
+\]
+
+\subsection{maximum of absolute values problem}
+
+The maximum of absolute values problem is
+\[
+    \min_{\|x\|_2\le r}
+    \max_{1\le j\le m}|a_j^\top x-b_j|.
+\]
+It minimizes the worst absolute residual.
+
+Each absolute value can be rewritten as
+\[
+    |a_j^\top x-b_j|
+    =
+    \max\{a_j^\top x-b_j,\,-a_j^\top x+b_j\}.
+\]
+Define
+\[
+    \tilde A=
+    \begin{bmatrix}
+        A\\
+        -A
+    \end{bmatrix},
+    \qquad
+    \tilde b=
+    \begin{bmatrix}
+        -b\\
+        b
+    \end{bmatrix}.
+\]
+Then
+\[
+    \max_j |a_j^\top x-b_j|
+    =
+    \max_{\ell=1,\ldots,2m}
+    \left\{
+        \tilde a_\ell^\top x+\tilde b_\ell
+    \right\}.
+\]
+Equivalently,
+\[
+    f(x)
+    =
+    \max_{u\in\Delta_{2m}}
+    u^\top(\tilde A x+\tilde b).
+\]
+
+The primal prox-function is
+\[
+    d_1(x)=\frac12\|x\|_2^2,
+    \qquad
+    D_1=\frac12r^2.
+\]
+The dual prox-function is entropy on \(\Delta_{2m}\):
+\[
+    d_2(u)
+    =
+    \ln(2m)+\sum_{\ell=1}^{2m}u_\ell\ln u_\ell,
+    \qquad
+    D_2=\ln(2m).
+\]
+
+The smoothed objective is
+\[
+    f_\mu(x)
+    =
+    \mu
+    \ln
+    \left(
+        \frac{1}{2m}
+        \sum_{\ell=1}^{2m}
+        \exp
+        \left(
+            \frac{\tilde a_\ell^\top x+\tilde b_\ell}{\mu}
+        \right)
+    \right).
+\]
+Equivalently,
+\[
+    f_\mu(x)
+    =
+    \mu
+    \ln
+    \left(
+        \frac{1}{m}
+        \sum_{j=1}^{m}
+        \xi
+        \left(
+            \frac{a_j^\top x-b_j}{\mu}
+        \right)
+    \right),
+\]
+where
+\[
+    \xi(t)=\frac12(e^t+e^{-t}).
+\]
+
+The dual value is
+\[
+    \phi(u)
+    =
+    \tilde b^\top u
+    -
+    r\|\tilde A^\top u\|_2.
+\]
+The primal-dual gap is
+\[
+    \max_j|a_j^\top x-b_j|-\phi(u).
+\]
+
+\subsection{Sum of absolute values problem}
+
+The fourth problem is
+\[
+    \min_{\|x\|_2\le r}
+    \sum_{j=1}^m |a_j^\top x-b_j|.
+\]
+This is related to least absolute deviations and robust regression.
+
+Each absolute value has the representation
+\[
+    |a_j^\top x-b_j|
+    =
+    \max_{|u_j|\le1}u_j(a_j^\top x-b_j).
+\]
+Therefore
+\[
+    \sum_{j=1}^m |a_j^\top x-b_j|
+    =
+    \max_{\|u\|_\infty\le1}
+    \sum_{j=1}^m u_j(a_j^\top x-b_j).
+\]
+
+The primal feasible set is the Euclidean ball, with
+\[
+    d_1(x)=\frac12\|x\|_2^2,
+    \qquad
+    D_1=\frac12r^2.
+\]
+
+The smoothed absolute value is
+\[
+    \psi_\mu(t)
+    =
+    \begin{cases}
+        \dfrac{t^2}{2\mu}, & |t|\le\mu,\\[6pt]
+        |t|-\dfrac{\mu}{2}, & |t|>\mu.
+    \end{cases}
+\]
+Thus
+\[
+    f_\mu(x)
+    =
+    \sum_{j=1}^m
+    \psi_\mu(a_j^\top x-b_j).
+\]
+
+The smoothed dual coordinate is
+\[
+    u_j(x)
+    =
+    \begin{cases}
+        \dfrac{a_j^\top x-b_j}{\mu}, & |a_j^\top x-b_j|\le\mu,\\[8pt]
+        \operatorname{sign}(a_j^\top x-b_j), & |a_j^\top x-b_j|>\mu.
+    \end{cases}
+\]
+The gradient is
+\[
+    \nabla f_\mu(x)=A^\top u(x).
+\]
+
+For a feasible dual vector \(u\), the dual value is
+\[
+    \phi(u)
+    =
+    -b^\top u-r\|A^\top u\|_2.
+\]
+The primal-dual gap is
+\[
+    \sum_{j=1}^m |a_j^\top x-b_j|-\phi(u).
+\]
+
+\section{Changing the Smoothing Parameter}
+
+The theoretical method uses a fixed smoothing parameter. For a target accuracy
+\(\varepsilon\), the typical choice is
+\[
+    \mu=\frac{\varepsilon}{2D_2}.
+\]
+This gives
+\[
+    \mu D_2=\frac{\varepsilon}{2},
+\]
+so half of the error budget is assigned to smoothing error.
+
+In practice, the value of \(\mu\) can also be changed during the optimization.
+The motivation is that large \(\mu\) gives an easier and smoother problem, while
+small \(\mu\) gives a more accurate approximation. A continuation strategy
+starts with
+\[
+    \mu_0 = c\mu_{\mathrm{final}},
+\]
+where \(c>1\), and then decreases \(\mu\) geometrically:
+\[
+    \mu_{t+1}=\rho\mu_t,
+    \qquad 0<\rho<1.
+\]
+
+In the implementation, a typical choice is
+\[
+    \mu_0=8\mu_{\mathrm{final}},
+    \qquad
+    \rho=0.5.
+\]
+This gives the sequence
+\[
+    8\mu_{\mathrm{final}},\quad
+    4\mu_{\mathrm{final}},\quad
+    2\mu_{\mathrm{final}},\quad
+    \mu_{\mathrm{final}}.
+\]
+
+At intermediate stages, the method stops when the gap is comparable to the
+current smoothing error:
+\[
+    f(\hat x)-\phi(\hat u)\le c_{\mathrm{stage}}\mu_tD_2.
+\]
+At the final stage, the full condition is required:
+\[
+    f(\hat x)-\phi(\hat u)\le\varepsilon.
+\]
+
+The fixed-\(\mu\) method is the version directly covered by the theory.
+Changing \(\mu\) is a practical heuristic intended to reduce the computational
+cost by solving a sequence of easier smoothed problems.
+
+
+
+\section{Experiments and Results}
+
+This section presents the computational experiments. The experiments have four
+purposes. First, the matrix game experiment from Nesterov's paper is reproduced
+and used as a reference. Second, analogous reproduction-style experiments are
+performed for the continuous location problem and the two piecewise-linear
+absolute-value objectives. Third, a fixed-size epsilon-scaling experiment is used
+to check the dependence of the iteration count on the accuracy parameter
+\(\varepsilon\). Finally, the fixed smoothing parameter is compared with a
+continuation strategy in which \(\mu\) is decreased during optimization.
+
+In all experiments, the stopping criterion is the primal-dual gap condition
+
+\[
+    f(\hat x)-\phi(\hat u)\le \varepsilon.
+\]
+
+Therefore, convergence means that the obtained solution is certified to be
+\(\varepsilon\)-optimal.
+
+\subsection{Reproduction of Nesterov's matrix game experiment}
+
+The first experiment reproduces the matrix game experiment from Nesterov's
+paper. The problem is
+
+\[
+    \min_{x\in\Delta_n}\max_{u\in\Delta_m}u^\top A x,
+\]
+
+where \(A\in\mathbb{R}^{m\times n}\). Random matrices were generated with
+entries sampled uniformly from \([-1,1]\).
+
+The tested grid was
+
+\[
+\begin{array}{c|c|c}
+\varepsilon & m & n\\
+\hline
+10^{-2} & 100,300,1000 & 100,300,1000,3000,10000\\
+10^{-3} & 100,300,1000 & 100,300,1000,3000,10000\\
+10^{-4} & 100,300,1000 & 100,300,1000,3000
+\end{array}
+\]
+
+Similarly to the original paper, the results are presented as separate tables
+for each value of \(\varepsilon\). Rows correspond to \(m\), columns correspond
+to \(n\), and each cell contains
+
+\[
+    \text{iterations / percentage of predicted iterations}.
+\]
+
+\begin{table}[H]
+    \centering
+    \input{results/tables/reproduction_eps_0_01.tex}
+    \caption{Matrix game reproduction results for $\varepsilon=0.01$.
+    Each cell shows iterations / percentage of predicted iterations.}
+    \label{tab:reproduction-eps-001}
+\end{table}
+
+\begin{table}[H]
+    \centering
+    \input{results/tables/reproduction_eps_0_001.tex}
+    \caption{Matrix game reproduction results for $\varepsilon=0.001$.
+    Each cell shows iterations / percentage of predicted iterations.}
+    \label{tab:reproduction-eps-0001}
+\end{table}
+
+\begin{table}[H]
+    \centering
+    \input{results/tables/reproduction_eps_0_0001.tex}
+    \caption{Matrix game reproduction results for $\varepsilon=0.0001$.
+    Each cell shows iterations / percentage of predicted iterations.}
+    \label{tab:reproduction-eps-00001}
+\end{table}
+
+The aggregate results are summarized in Table~\ref{tab:matrix-game-summary}.
+
+\begin{table}[H]
+    \centering
+    \input{results/tables/reproduction_summary.tex}
+    \caption{Aggregate summary of the matrix game reproduction experiment.}
+    \label{tab:matrix-game-summary}
+\end{table}
+
+\paragraph{Conclusion.}
+The reproduced matrix game experiment confirms the main practical behavior
+reported in the paper. All tested instances reached the required primal-dual
+gap. The number of iterations was significantly smaller than the theoretical
+prediction. In the generated results, the method used only a fraction of the
+predicted number of iterations, which shows that the theoretical estimate is
+conservative in practice.
+
+The results also show the expected dependence on \(\varepsilon\). When
+\(\varepsilon\) is decreased by one order of magnitude, the number of iterations
+increases approximately by one order of magnitude. This is consistent with the
+theoretical complexity \(O(1/\varepsilon)\). The theoretical bound is therefore
+conservative, but it captures the correct scaling.
+
+\subsection{Experiments for the other examples}
+
+After reproducing the matrix game experiment, analogous experiments were
+performed for the other implemented examples. The goal was to check whether the
+same smoothing framework behaves similarly for different non-smooth structures.
+
+The tested problems were:
+
+\begin{enumerate}
+    \item continuous location problem,
+    \item maximum of absolute values problem,
+    \item sum of absolute values problem.
+\end{enumerate}
+
+In each case, the same type of information was recorded: number of iterations,
+predicted number of iterations, percentage of the predicted bound used, runtime,
+and final primal-dual gap.
+
+\subsubsection{Continuous location problem}
+
+The continuous location problem is
+
+\[
+    \min_{\|x\|_2\le r}
+    \sum_{j=1}^p w_j\|x-c_j\|_2.
+\]
+
+City locations were generated randomly inside an Euclidean ball and positive
+weights were assigned to the cities. The radius was fixed to \(r=1\).
+
+The tested grid was
+
+\[
+\begin{array}{c|c|c|c}
+\varepsilon & \text{number of cities} & \text{dimension} & r\\
+\hline
+10^{-2} & 10,50 & 2,5 & 1\\
+10^{-3} & 10,50 & 2,5 & 1\\
+10^{-4} & 10,50 & 2,5 & 1
+\end{array}
+\]
+
+The results are presented separately for each value of \(\varepsilon\). Rows
+correspond to the number of cities \(p\), columns correspond to the dimension
+\(d\), and each cell contains
+
+\[
+    \text{iterations / percentage of predicted iterations}.
+\]
+
+\begin{table}[H]
+    \centering
+    \input{results/tables/continuous_location_eps_0_01.tex}
+    \caption{Continuous location results for $\varepsilon=0.01$.
+    Each cell shows iterations / percentage of predicted iterations.}
+    \label{tab:continuous-location-eps-001}
+\end{table}
+
+\begin{table}[H]
+    \centering
+    \input{results/tables/continuous_location_eps_0_001.tex}
+    \caption{Continuous location results for $\varepsilon=0.001$.
+    Each cell shows iterations / percentage of predicted iterations.}
+    \label{tab:continuous-location-eps-0001}
+\end{table}
+
+\begin{table}[H]
+    \centering
+    \input{results/tables/continuous_location_eps_0_0001.tex}
+    \caption{Continuous location results for $\varepsilon=0.0001$.
+    Each cell shows iterations / percentage of predicted iterations.}
+    \label{tab:continuous-location-eps-00001}
+\end{table}
+
+The aggregate results are shown in Table~\ref{tab:continuous-location-summary}.
+
+\begin{table}[H]
+    \centering
+    \input{results/tables/continuous_location_summary.tex}
+    \caption{Summary of continuous location experiments.}
+    \label{tab:continuous-location-summary}
+\end{table}
+
+\paragraph{Conclusion.}
+All continuous location instances converged. The achieved gaps were below the
+required tolerances. The method required substantially fewer iterations than the
+theoretical upper bound predicted, which confirms that the bound is conservative
+for this example as well.
+
+The iteration count increased significantly as \(\varepsilon\) decreased, which
+is consistent with the theoretical dependence on \(1/\varepsilon\). Runtime was
+moderate because the tested continuous location instances were relatively
+small.
+
+\subsubsection{maximum of absolute values problem}
+
+The maximum of absolute values problem is
+
+\[
+    \min_{\|x\|_2\le r}
+    \max_{1\le j\le m}|a_j^\top x-b_j|.
+\]
+
+Random matrices \(A\) and vectors \(b\) were generated with entries sampled
+uniformly from \([-1,1]\). The radius was fixed to \(r=1\).
+
+The tested grid was
+
+\[
+\begin{array}{c|c|c|c}
+\varepsilon & m & n & r\\
+\hline
+10^{-2} & 100,300 & 50,200 & 1\\
+10^{-3} & 100,300 & 50,200 & 1\\
+10^{-4} & 100,300 & 50,200 & 1
+\end{array}
+\]
+
+The results are presented separately for each value of \(\varepsilon\). Rows
+correspond to \(m\), columns correspond to \(n\), and each cell contains
+
+\[
+    \text{iterations / percentage of predicted iterations}.
+\]
+
+\begin{table}[H]
+    \centering
+    \input{results/tables/piecewise_linear_eps_0_01.tex}
+    \caption{maximum of absolute values results for $\varepsilon=0.01$.
+    Each cell shows iterations / percentage of predicted iterations.}
+    \label{tab:piecewise-eps-001}
+\end{table}
+
+\begin{table}[H]
+    \centering
+    \input{results/tables/piecewise_linear_eps_0_001.tex}
+    \caption{maximum of absolute values results for $\varepsilon=0.001$.
+    Each cell shows iterations / percentage of predicted iterations.}
+    \label{tab:piecewise-eps-0001}
+\end{table}
+
+\begin{table}[H]
+    \centering
+    \input{results/tables/piecewise_linear_eps_0_0001.tex}
+    \caption{maximum of absolute values results for $\varepsilon=0.0001$.
+    Each cell shows iterations / percentage of predicted iterations.}
+    \label{tab:piecewise-eps-00001}
+\end{table}
+
+The aggregate results are shown in Table~\ref{tab:piecewise-summary}.
+
+\begin{table}[H]
+    \centering
+    \input{results/tables/piecewise_linear_summary.tex}
+    \caption{Summary of maximum of absolute values experiments.}
+    \label{tab:piecewise-summary}
+\end{table}
+
+\paragraph{Conclusion.}
+All maximum of absolute values instances converged. The final gaps were below
+the requested tolerances. The results show that entropy smoothing of the maximum
+over affine functions works effectively in practice.
+
+Compared with the theoretical prediction, the actual number of iterations was
+again smaller. This confirms the same pattern observed for matrix games and
+continuous location: the theoretical bound is useful for predicting the scaling,
+but it overestimates the absolute number of iterations needed on these random
+instances.
+
+\subsubsection{Sum of absolute values problem}
+
+The sum of absolute values problem is
+
+\[
+    \min_{\|x\|_2\le r}
+    \sum_{j=1}^m |a_j^\top x-b_j|.
+\]
+
+Random matrices \(A\) and vectors \(b\) were generated with entries sampled
+uniformly from \([-1,1]\). The radius was fixed to \(r=1\).
+
+The tested grid was
+
+\[
+\begin{array}{c|c|c|c}
+\varepsilon & m & n & r\\
+\hline
+10^{-2} & 100,300 & 50,200 & 1\\
+10^{-3} & 100,300 & 50,200 & 1\\
+10^{-4} & 100,300 & 50,200 & 1
+\end{array}
+\]
+
+The results are presented separately for each value of \(\varepsilon\). Rows
+correspond to \(m\), columns correspond to \(n\), and each cell contains
+
+\[
+    \text{iterations / percentage of predicted iterations}.
+\]
+
+\begin{table}[H]
+    \centering
+    \input{results/tables/sum_absolute_eps_0_01.tex}
+    \caption{Sum of absolute values results for $\varepsilon=0.01$.
+    Each cell shows iterations / percentage of predicted iterations.}
+    \label{tab:sum-absolute-eps-001}
+\end{table}
+
+\begin{table}[H]
+    \centering
+    \input{results/tables/sum_absolute_eps_0_001.tex}
+    \caption{Sum of absolute values results for $\varepsilon=0.001$.
+    Each cell shows iterations / percentage of predicted iterations.}
+    \label{tab:sum-absolute-eps-0001}
+\end{table}
+
+\begin{table}[H]
+    \centering
+    \input{results/tables/sum_absolute_eps_0_0001.tex}
+    \caption{Sum of absolute values results for $\varepsilon=0.0001$.
+    Each cell shows iterations / percentage of predicted iterations.}
+    \label{tab:sum-absolute-eps-00001}
+\end{table}
+
+The aggregate results are shown in Table~\ref{tab:sum-absolute-summary}.
+
+\begin{table}[H]
+    \centering
+    \input{results/tables/sum_absolute_summary.tex}
+    \caption{Summary of sum of absolute values experiments.}
+    \label{tab:sum-absolute-summary}
+\end{table}
+
+\paragraph{Conclusion.}
+All sum of absolute values instances converged. However, this problem required
+substantially more iterations than the other examples.
+
+This is expected because the objective sums all absolute residuals, while the
+max-absolute problem only considers the largest residual. The sum structure can
+lead to larger Lipschitz constants for the smoothed objective. Nevertheless, the
+actual iteration count was still significantly below the theoretical prediction.
+
+\subsection{Overall comparison of the reproduction-style experiments}
+
+The results across all four examples are summarized in
+Table~\ref{tab:overall-summary}.
+
+\begin{table}[H]
+    \centering
+    \input{results/tables/overall_summary.tex}
+    \caption{Overall comparison of reproduction-style experiments.}
+    \label{tab:overall-summary}
+\end{table}
+
+\paragraph{Conclusion.}
+The same smoothing framework works for all tested examples. In every case, the
+method reached the requested primal-dual gap. The theoretical iteration bound
+was conservative for all examples: the method typically required much less than
+the predicted number of iterations.
+
+The experiments also show that the practical difficulty depends strongly on the
+structure of the problem. The sum of absolute values problem required the most
+iterations, while the maximum of absolute values and continuous location
+problems were cheaper for the tested sizes. Matrix games became expensive
+mainly because the largest tested matrices had very large dimensions.
+
+\subsection{Fixed-size epsilon-scaling experiment}
+
+The previous experiments used grids with several problem dimensions. To examine
+the dependence on \(\varepsilon\) more directly, an additional fixed-size
+experiment was performed.
+
+For each problem class and each random seed, one random instance was generated
+and reused for all values of \(\varepsilon\). Thus, only the accuracy parameter
+changed. This isolates the dependence of the iteration count on
+\(\varepsilon\).
+
+The tested values were
+
+\[
+    \varepsilon
+    \in
+    \{10^{-1},5\cdot10^{-2},10^{-2},5\cdot10^{-3},
+    10^{-3},5\cdot10^{-4},10^{-4}\}.
+\]
+
+The fixed problem sizes were:
+
+\[
+\begin{array}{l|c}
+\text{Problem} & \text{Size}\\
+\hline
+\text{Matrix game} & m=300,\ n=1000\\
+\text{Continuous location} & p=50,\ d=5,\ r=1\\
+\text{Maximum of absolute values} & m=300,\ n=200,\ r=1\\
+\text{Sum of absolute values} & m=300,\ n=200,\ r=1
+\end{array}
+\]
+
+The numerical results are summarized in Table~\ref{tab:epsilon-scaling-summary}.
+
+\begin{table}[H]
+    \centering
+    \input{results/tables/epsilon_scaling_summary.tex}
+    \caption{Summary of the fixed-size epsilon-scaling experiment.}
+    \label{tab:epsilon-scaling-summary}
+\end{table}
+
+\subsubsection{Iterations versus \texorpdfstring{\(1/\varepsilon\)}{1/epsilon}}
+
+The first plot shows the mean number of iterations as a function of
+\(1/\varepsilon\).
+
+\begin{figure}[H]
+    \centering
+    \includegraphics[width=0.85\textwidth]{results/plots/epsilon_scaling_iterations_vs_inverse_epsilon.png}
+    \caption{Mean number of iterations versus \(1/\varepsilon\).}
+    \label{fig:epsilon-scaling-linear}
+\end{figure}
+
+The goal of this plot is to check the theoretical prediction visually. If
+
+\[
+    N(\varepsilon)\approx C\frac{1}{\varepsilon},
+\]
+
+then the curves should be approximately linear. The plot shows this behavior
+for all four implemented examples. The sum of absolute values problem has the
+largest constant factor, while the matrix game has the smallest one in this
+experiment. However, the main point is that the curves grow approximately
+linearly with \(1/\varepsilon\), which supports the expected complexity
+
+\[
+    N=O(1/\varepsilon).
+\]
+
+
+\subsubsection{Log-log plot and fitted exponent}
+
+To examine the empirical rate more precisely, the iteration counts were also
+analyzed on a log-log scale. If the number of iterations satisfies a relation of
+the form
+
+\[
+    N(\varepsilon)\approx C\varepsilon^{-p},
+\]
+
+then taking logarithms gives
+
+\[
+    \log N
+    =
+    \log C+p\log(1/\varepsilon).
+\]
+
+Thus, the exponent \(p\) can be estimated as the slope of a linear regression
+between \(\log N\) and \(\log(1/\varepsilon)\). The theoretical complexity
+\(N=O(1/\varepsilon)\) corresponds to
+
+\[
+    p=1.
+\]
+
+The log-log plot is shown in Figure~\ref{fig:epsilon-scaling-loglog}. The
+approximately linear shape of the curves confirms that a power-law model is a
+reasonable description of the observed dependence on \(\varepsilon\).
+
+\begin{figure}[H]
+    \centering
+    \includegraphics[width=0.85\textwidth]{results/plots/epsilon_scaling_loglog.png}
+    \caption{Log-log plot for the epsilon-scaling experiment.}
+    \label{fig:epsilon-scaling-loglog}
+\end{figure}
+
+The fitted exponents are shown in Table~\ref{tab:epsilon-scaling-regression}.
+The table reports the estimated exponent \(\hat p\) and its standard error.
+
+\begin{table}[H]
+    \centering
+    \input{results/tables/epsilon_scaling_regression.tex}
+    \caption{Fitted exponents in the empirical model
+    \(N(\varepsilon)\approx C\varepsilon^{-p}\).}
+    \label{tab:epsilon-scaling-regression}
+\end{table}
+
+The fitted exponents for the matrix game and continuous location problem are
+very close to \(1\), which is consistent with the theoretical
+\(O(1/\varepsilon)\) complexity. For the maximum of absolute values problem and
+the sum of absolute values problem, the fitted exponents are slightly below
+\(1\). This means that, for these random instances, the observed iteration
+counts grew slightly slower than the worst-case \(1/\varepsilon\) rate.
+
+Overall, the log-log analysis supports the theoretical prediction. The observed
+rates are close to \(1/\varepsilon\), and in some cases slightly better. This is
+consistent with the interpretation that the theoretical complexity bound is a
+worst-case estimate and may be conservative on randomly generated instances.
+
+
+
+\subsection{Experiment with changing the smoothing parameter \texorpdfstring{\(\mu\)}{mu}}
+
+The previous experiments used the fixed smoothing parameter prescribed by the
+theory. In this experiment, this fixed-\(\mu\) strategy is compared with a
+continuation strategy, where the smoothing parameter is changed during the
+optimization process.
+
+The motivation is the trade-off between accuracy and smoothness. A smaller
+\(\mu\) gives a better approximation of the original non-smooth problem, but it
+also increases the Lipschitz constant of the smoothed objective. Therefore, a
+smaller \(\mu\) makes the problem harder to optimize. The continuation strategy
+tries to exploit this by starting with a larger and easier smoothing parameter,
+and then gradually decreasing it.
+
+Two strategies were compared: the fixed-\(\mu\) strategy and the continuation
+strategy.
+
+In the fixed strategy, the algorithm uses the final theoretical value
+\(\mu_{\mathrm{final}}\) from the beginning. In the continuation strategy, the
+initial value is
+
+\[
+    \mu_0=8\mu_{\mathrm{final}},
+\]
+
+and then \(\mu\) is decreased geometrically:
+
+\[
+    \mu_{t+1}=0.5\mu_t.
+\]
+
+Thus, the continuation sequence is
+
+\[
+    8\mu_{\mathrm{final}},
+    \quad
+    4\mu_{\mathrm{final}},
+    \quad
+    2\mu_{\mathrm{final}},
+    \quad
+    \mu_{\mathrm{final}}.
+\]
+
+At intermediate stages, the algorithm stops when the gap is comparable to the
+current smoothing error. At the final stage, the usual stopping condition is
+used:
+
+\[
+    f(\hat x)-\phi(\hat u)\le \varepsilon.
+\]
+
+The experiment was performed for all four problem classes, using the same fixed
+problem sizes as in the epsilon-scaling experiment:
+
+\[
+\begin{array}{l|c}
+\text{Problem} & \text{Size}\\
+\hline
+\text{Matrix game} & m=300,\ n=1000\\
+\text{Continuous location} & p=50,\ d=5,\ r=1\\
+\text{Maximum of absolute values} & m=300,\ n=200,\ r=1\\
+\text{Sum of absolute values} & m=300,\ n=200,\ r=1
+\end{array}
+\]
+
+The tested accuracies were
+
+\[
+    \varepsilon\in\{10^{-2},10^{-3},10^{-4}\}.
+\]
+
+For each problem, each value of \(\varepsilon\), and each random seed, the same
+random instance was solved twice: once with fixed \(\mu\), and once with the
+continuation strategy. This makes the comparison fair, since both methods solve
+the same instance.
+
+\subsubsection{Iteration comparison}
+
+Table~\ref{tab:mu-comparison-summary} reports the average number of iterations
+for both strategies.
+
+\begin{table}[H]
+    \centering
+    \input{results/tables/mu_comparison_summary.tex}
+    \caption{Comparison of fixed \(\mu\) and continuation \(\mu\).}
+    \label{tab:mu-comparison-summary}
+\end{table}
+
+The results show that continuation did not improve the iteration count for most
+tested cases. For the matrix game, maximum of absolute values problem, and
+sum of absolute values problem, the continuation method required more iterations
+than the fixed-\(\mu\) method for all tested accuracies. The same behavior is
+also visible for the continuous location problem for \(\varepsilon=10^{-3}\)
+and \(\varepsilon=10^{-4}\). The only case where continuation improved the
+average iteration count was continuous location with \(\varepsilon=10^{-2}\).
+
+This indicates that, for the tested instances and the chosen continuation
+parameters, the extra stages introduced by changing \(\mu\) did not compensate
+for the additional iterations needed across stages.
+
+\subsubsection{Iteration speedup}
+
+To make the comparison clearer, Table~\ref{tab:mu-comparison-speedup} reports
+the iteration speedup
+
+\[
+    \text{speedup}
+    =
+    \frac{
+        \text{iterations for fixed } \mu
+    }{
+        \text{iterations for continuation } \mu
+    }.
+\]
+
+Thus, values greater than \(1\) mean that continuation used fewer iterations,
+while values below \(1\) mean that fixed \(\mu\) was better.
+
+\begin{table}[H]
+    \centering
+    \input{results/tables/mu_comparison_speedup.tex}
+    \caption{Iteration speedup of continuation relative to fixed \(\mu\).}
+    \label{tab:mu-comparison-speedup}
+\end{table}
+
+The speedup table confirms the previous observation. Most speedup values are
+below \(1\), usually around \(0.75\)--\(0.81\). This means that continuation
+typically required about \(20\%\)--\(30\%\) more iterations than the fixed
+strategy. The only average speedup above \(1\) occurs for the continuous
+location problem with \(\varepsilon=10^{-2}\), where the mean speedup is
+approximately \(1.28\). However, even in this case the minimum speedup is below
+\(1\), so the improvement was not consistent across all seeds.
+
+Overall, this experiment suggests that the fixed-\(\mu\) method is more
+efficient for the tested settings.
+
+\subsubsection{Gap history}
+
+In addition to final iteration counts, the primal-dual gap was tracked during
+optimization for representative runs with
+
+\[
+    \varepsilon=10^{-4},
+    \qquad
+    \text{seed}=0.
+\]
+
+This gives more detailed information about the behavior of both methods. The
+following plots show the primal-dual gap as a function of the iteration number.
+The \(y\)-axis is logarithmic, and the horizontal dotted line marks the target
+accuracy \(\varepsilon=10^{-4}\). For the continuation method, vertical dotted
+lines indicate changes of the smoothing parameter \(\mu\).
+
+\begin{figure}[H]
+    \centering
+    \includegraphics[width=0.9\textwidth]{results/plots/mu_gap_history_matrix_game_eps_1e-04.png}
+    \caption{Gap history for the matrix game with $\varepsilon=10^{-4}$.}
+    \label{fig:mu-gap-history-matrix-game}
+\end{figure}
+
+\begin{figure}[H]
+    \centering
+    \includegraphics[width=0.9\textwidth]{results/plots/mu_gap_history_continuous_location_eps_1e-04.png}
+    \caption{Gap history for the continuous location problem with
+    $\varepsilon=10^{-4}$.}
+    \label{fig:mu-gap-history-continuous-location}
+\end{figure}
+
+\begin{figure}[H]
+    \centering
+    \includegraphics[width=0.9\textwidth]{results/plots/mu_gap_history_piecewise_linear_max_abs_eps_1e-04.png}
+    \caption{Gap history for the maximum of absolute values problem with
+    $\varepsilon=10^{-4}$.}
+    \label{fig:mu-gap-history-piecewise}
+\end{figure}
+
+\begin{figure}[H]
+    \centering
+    \includegraphics[width=0.9\textwidth]{results/plots/mu_gap_history_sum_absolute_eps_1e-04.png}
+    \caption{Gap history for the sum of absolute values problem with
+    $\varepsilon=10^{-4}$.}
+    \label{fig:mu-gap-history-sum-absolute}
+\end{figure}
+
+The plots show that continuation reduces the gap quickly inside each stage, but
+after each decrease of \(\mu\), the gap increases again. This is expected:
+changing \(\mu\) changes the smoothed objective and makes the approximation
+closer to the original non-smooth function. Therefore, the current point may no
+longer have as small a gap for the new, less smoothed problem.
+
+For the tested instances, the fixed-\(\mu\) method reaches the target line
+earlier than continuation. This is especially clear for the matrix game,
+maximum of absolute values problem, and sum of absolute values problem. In
+the continuous location problem, the difference is smaller, but the fixed method
+still reaches the final tolerance earlier for the displayed
+\(\varepsilon=10^{-4}\) run.
+
+\paragraph{Conclusion.}
+The changing-\(\mu\) experiment shows that continuation is not automatically
+better than using the fixed theoretical smoothing parameter. Although larger
+values of \(\mu\) make the early stages easier, the method must still solve
+several stages and the gap can increase when \(\mu\) is decreased. In the tested
+configuration, with start factor \(8\) and decay \(0.5\), this additional work
+usually outweighed the benefit of starting with a smoother problem.
+
+Therefore, for the implemented examples and tested parameters, the fixed-\(\mu\)
+strategy is preferable. Continuation remains a potentially useful heuristic, but
+its performance depends on the choice of the starting factor, decay rate, and
+stage stopping rule. Further experiments with different continuation parameters
+would be needed before concluding that changing \(\mu\) is beneficial.
+
+
+
+\section{Discussion}
+
+The experiments confirm the main practical message of Nesterov's smoothing
+method. The primal-dual gap was below the requested tolerance in all tested
+reproduction-style experiments, so the stopping criterion provided a meaningful
+certificate of solution quality. At the same time, the actual number of
+iterations was consistently below the theoretical upper bound. This is expected,
+because the bound is a worst-case estimate, while the experiments use randomly
+generated instances.
+
+The epsilon-scaling experiment gives the clearest evidence for the theoretical
+rate. For the matrix game and continuous location problem, the fitted exponents
+are very close to \(1\), which agrees with the predicted
+\(O(1/\varepsilon)\) complexity. For the maximum of absolute values and sum of
+absolute values problems, the fitted exponents are below \(1\). This does not
+contradict the theory; instead, it means that the observed growth was slightly
+better than the worst-case rate on the tested instances.
+
+The results also show that the constant hidden in the complexity estimate is
+important. The sum of absolute values problem required many more iterations than
+the other examples, even though its dependence on \(\varepsilon\) remained close
+to linear. This is consistent with the structure of the objective: unlike the
+maximum of absolute values, which depends only on the largest residual, the sum
+of absolute values aggregates all residuals and can therefore lead to a larger
+effective Lipschitz constant after smoothing.
+
+The continuation experiment shows that changing \(\mu\) is not automatically
+beneficial. Although larger values of \(\mu\) make the early smoothed problems
+easier, the method must solve several stages. Moreover, when \(\mu\) is reduced,
+the gap can increase because the smoothed approximation changes. With the tested
+parameters \(\mu_0=8\mu_{\mathrm{final}}\) and decay factor \(0.5\), the fixed
+strategy was usually better in terms of iteration count. Continuation should
+therefore be treated as a heuristic whose performance depends on the stage
+schedule and stopping rule.
+
+\section{Conclusion}
+
+This project implemented Nesterov's smoothing technique for several structured
+non-smooth convex optimization problems. The method was applied to matrix games,
+the continuous location problem, and two piecewise-linear absolute-value
+objectives. In each case, the non-smooth objective was represented through an
+auxiliary maximization problem, smoothed by adding a prox-term, and minimized
+using an accelerated first-order method.
+
+The numerical experiments support the theoretical behavior of the method. All
+tested instances reached the required primal-dual gap, and the observed
+iteration counts were substantially smaller than the theoretical worst-case
+predictions. The fixed-size epsilon-scaling experiment showed an approximately
+linear dependence on \(1/\varepsilon\), in agreement with the theoretical
+\(O(1/\varepsilon)\) complexity. The experiments also demonstrated that the same
+smoothing framework can be applied to different problem structures, although the
+practical number of iterations depends strongly on the particular objective.
+
+The tested continuation strategy for changing the smoothing parameter did not
+improve performance for most instances. The fixed theoretical smoothing
+parameter was usually more efficient. This suggests that, for the implemented
+examples, the basic fixed-\(\mu\) method is the preferable default choice.
+Continuation remains an interesting practical modification, but further tuning
+of the initial smoothing parameter, decay factor, and stage stopping criterion
+would be needed to make it competitive.
+
+Overall, the implementation and experiments confirm the usefulness of
+Nesterov's smoothing framework: it gives a systematic way to solve structured
+non-smooth convex problems with a certified primal-dual gap and with empirical
+iteration growth consistent with the theoretical \(O(1/\varepsilon)\) rate.
+
+\bibliographystyle{plain}
+\bibliography{references}
+
+\end{document}
