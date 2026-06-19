@@ -11,7 +11,7 @@
 \usepackage{subcaption}
 
 
-\title{Nesterov Smoothing for Structured Non-Smooth Convex Optimization}
+\title{Nesterov: Smooth minimization of non-smooth functions}
 \author{Michał Szewczak, Sebastian Trojan}
 \date{}
 
@@ -384,84 +384,169 @@ experiments.
 
 \section{Problem Classes}
 
-This section presents the problem classes used in the experiments. The examples
-are based on the application examples discussed by Nesterov. For each problem,
-we give the original formulation, explain its interpretation, and show the
-basic max-representation that connects it with the smoothing framework.
+This section presents the problem classes used in the experiments. All of them
+are based on application examples discussed by Nesterov. The goal is to show how
+each problem can be written in the structured form
+\[
+    \min_{x\in Q_1}
+    \left\{
+        \hat f(x)
+        +
+        \max_{u\in Q_2}
+        \left(
+            \langle Ax,u\rangle-\hat\phi(u)
+        \right)
+    \right\}.
+\]
+In all examples considered here, \(\hat f(x)=0\). Thus, the essential step is
+to express the non-smooth objective as a maximization over an auxiliary
+variable.
 
 \subsection{Matrix games}
 
-The first example is the matrix game problem
+The matrix game problem is
 \[
     \min_{x\in\Delta_n}
     \max_{u\in\Delta_m}
-    u^\top A x,
+    u^\top Ax,
 \]
-where \(A\in\mathbb{R}^{m\times n}\), and \(\Delta_n\) and \(\Delta_m\) are
-probability simplexes.
+where \(A\in\mathbb{R}^{m\times n}\), and \(\Delta_n,\Delta_m\) are probability
+simplexes. This problem can be interpreted as a two-player zero-sum game. The
+vector \(x\) is the mixed strategy of the minimizing player, while \(u\) is the
+mixed strategy of the maximizing player.
 
-This problem can be interpreted as a two-player zero-sum game. The vector
-\(x\) is the mixed strategy of the minimizing player, and \(u\) is the mixed
-strategy of the maximizing player. The quantity \(u^\top A x\) is the expected
-payoff. The minimizing player chooses \(x\) in order to make the worst possible
-expected payoff as small as possible.
-
-Since maximizing a linear function over the simplex selects the largest
-coordinate, the problem can also be written as
+The problem already has the required max-structure, because
 \[
-    \min_{x\in\Delta_n}
-    \max_{1\le j\le m}(Ax)_j .
+    u^\top Ax=\langle Ax,u\rangle.
 \]
-Thus the objective is the maximum of finitely many linear functions.
+Thus,
+\[
+    Q_1=\Delta_n,
+    \qquad
+    Q_2=\Delta_m,
+    \qquad
+    \hat\phi(u)=0.
+\]
+The final form is
+\[
+    \boxed{
+    \min_{x\in\Delta_n}
+    \max_{u\in\Delta_m}
+    \langle Ax,u\rangle .
+    }
+\]
+Equivalently,
+\[
+    \max_{u\in\Delta_m}u^\top Ax
+    =
+    \max_{1\le j\le m}(Ax)_j,
+\]
+so the objective is the maximum of finitely many linear functions.
 
 \subsection{Continuous location problem}
 
-The second example is the continuous location problem
+The continuous location problem is
 \[
     \min_{\|x\|_2\le r}
-    \sum_{j=1}^p w_j\|x-c_j\|_2.
+    \sum_{j=1}^{p}w_j\|x-c_j\|_2.
 \]
-Here \(x\) is the location of a facility, \(c_j\in\mathbb{R}^d\) are fixed
-locations of cities or customers, and \(w_j>0\) are weights. The feasible region
-is a Euclidean ball of radius \(r\).
+Here \(x\) is the location of a facility, \(c_j\) are fixed city or customer
+locations, and \(w_j>0\) are weights. The objective is the total weighted
+distance from the facility to the given points.
 
-The objective is the total weighted distance from the facility to the given
-points. The problem is convex, but it is non-smooth at points where \(x\)
-coincides with one of the locations \(c_j\).
-
-The max-structure follows from the dual representation of the Euclidean norm:
+The Euclidean norm has the representation
 \[
     \|x-c_j\|_2
     =
-    \max_{\|u_j\|_2\le 1}\langle x-c_j,u_j\rangle .
+    \max_{\|u_j\|_2\le 1}
+    \langle x-c_j,u_j\rangle.
+\]
+Applying this to each distance term gives
+\[
+    \sum_{j=1}^{p}w_j\|x-c_j\|_2
+    =
+    \max_{\|u_j\|_2\le 1}
+    \left\{
+        \sum_{j=1}^{p}w_j\langle x,u_j\rangle
+        -
+        \sum_{j=1}^{p}w_j\langle c_j,u_j\rangle
+    \right\}.
+\]
+
+The primal feasible set is
+\[
+    Q_1=\{x:\|x\|_2\le r\}.
+\]
+The auxiliary variable is \(U=(u_1,\ldots,u_p)\), with
+\[
+    Q_2=
+    \left\{
+        U=(u_1,\ldots,u_p):
+        \|u_j\|_2\le 1,\ j=1,\ldots,p
+    \right\}.
+\]
+With the operator
+\[
+    \mathcal A x=(w_1x,\ldots,w_px),
+\]
+we have
+\[
+    \langle \mathcal A x,U\rangle
+    =
+    \sum_{j=1}^{p}w_j\langle x,u_j\rangle.
 \]
 Therefore,
 \[
-    \sum_{j=1}^p w_j\|x-c_j\|_2
-    =
-    \max_{\|u_j\|_2\le 1}
-    \sum_{j=1}^p w_j\langle x-c_j,u_j\rangle .
+    \hat\phi(U)=
+    \sum_{j=1}^{p}w_j\langle c_j,u_j\rangle.
 \]
-This puts the problem into the same general form, with auxiliary variables
-\(u_1,\ldots,u_p\).
+The final form is
+\[
+    \boxed{
+    \min_{\|x\|_2\le r}
+    \max_{\|u_j\|_2\le 1}
+    \left\{
+        \sum_{j=1}^{p}w_j\langle x,u_j\rangle
+        -
+        \sum_{j=1}^{p}w_j\langle c_j,u_j\rangle
+    \right\}.
+    }
+\]
+
 
 \subsection{Maximum of absolute values problem}
 
-The third example is the maximum of absolute values problem
+The maximum of absolute values problem is
 \[
     \min_{\|x\|_2\le r}
     \max_{1\le j\le m}|a_j^\top x-b_j|.
 \]
-Here \(a_j\in\mathbb{R}^n\), \(b_j\in\mathbb{R}\), and the feasible set is a
-Euclidean ball.
+This problem minimizes the worst absolute residual among the affine expressions
+\(a_j^\top x-b_j\).
 
-Each absolute value is the maximum of two affine functions:
+Let
+\[
+    A=
+    \begin{bmatrix}
+        a_1^\top\\
+        \vdots\\
+        a_m^\top
+    \end{bmatrix},
+    \qquad
+    b=
+    \begin{bmatrix}
+        b_1\\
+        \vdots\\
+        b_m
+    \end{bmatrix}.
+\]
+Using
 \[
     |a_j^\top x-b_j|
     =
-    \max\{a_j^\top x-b_j,\,-a_j^\top x+b_j\}.
+    \max\{a_j^\top x-b_j,\,-a_j^\top x+b_j\},
 \]
-Hence the objective is the maximum of \(2m\) affine functions. If
+define
 \[
     \widetilde A=
     \begin{bmatrix}
@@ -473,53 +558,102 @@ Hence the objective is the maximum of \(2m\) affine functions. If
     \begin{bmatrix}
         -b\\
         b
-    \end{bmatrix},
+    \end{bmatrix}.
 \]
-then
+Then
 \[
     \max_{1\le j\le m}|a_j^\top x-b_j|
     =
     \max_{1\le \ell\le 2m}
-    \left\{
-        \widetilde a_\ell^\top x+\widetilde b_\ell
-    \right\}.
+    (\widetilde A x+\widetilde b)_\ell.
 \]
-Equivalently, using the simplex \(\Delta_{2m}\), this can be written in
-max-form as
+A maximum of coordinates can be written as a maximization over the simplex:
 \[
+    \max_{1\le \ell\le 2m}
+    (\widetilde A x+\widetilde b)_\ell
+    =
+    \max_{u\in\Delta_{2m}}
+    u^\top(\widetilde A x+\widetilde b).
+\]
+
+Thus,
+\[
+    Q_1=\{x:\|x\|_2\le r\},
+    \qquad
+    Q_2=\Delta_{2m},
+    \qquad
+    \hat f(x)=0,
+    \qquad
+    \hat\phi(u)=-\widetilde b^\top u.
+\]
+The final form is
+\[
+    \boxed{
     \min_{\|x\|_2\le r}
     \max_{u\in\Delta_{2m}}
     \left\{
-        \langle \widetilde A x,u\rangle+\widetilde b^\top u
+        \langle \widetilde A x,u\rangle
+        +
+        \widetilde b^\top u
     \right\}.
+    }
 \]
-This is a piecewise-linear convex problem of the same max-type as the matrix
-game example.
 
 \subsection{Sum of absolute values problem}
 
-The fourth example is the sum of absolute values problem
+The sum of absolute values problem is
 \[
     \min_{\|x\|_2\le r}
-    \sum_{j=1}^m |a_j^\top x-b_j|.
+    \sum_{j=1}^{m}|a_j^\top x-b_j|.
 \]
+This problem minimizes the total absolute residual over all affine expressions
+\(a_j^\top x-b_j\).
 
-Each term has the max-representation
+The identity
+\[
+    |t|=\max_{|u|\le 1}ut
+\]
+gives
 \[
     |a_j^\top x-b_j|
     =
-    \max_{|u_j|\le 1}u_j(a_j^\top x-b_j).
+    \max_{|u_j|\le 1}
+    u_j(a_j^\top x-b_j).
 \]
-Consequently,
+Since the variables \(u_j\) are chosen independently,
 \[
-    \sum_{j=1}^m |a_j^\top x-b_j|
+    \sum_{j=1}^{m}|a_j^\top x-b_j|
     =
     \max_{\|u\|_\infty\le 1}
-    \sum_{j=1}^m u_j(a_j^\top x-b_j).
+    \sum_{j=1}^{m}u_j(a_j^\top x-b_j).
 \]
-Thus, the problem fits Nesterov's structured max-form with the auxiliary set
-\(Q_2=[-1,1]^m\). This differs from the matrix game and maximum of absolute
-values examples, where the auxiliary set is a simplex.
+Expanding the expression gives
+\[
+    \sum_{j=1}^{m}u_j(a_j^\top x-b_j)
+    =
+    \langle Ax,u\rangle-b^\top u.
+\]
+
+Thus,
+\[
+    Q_1=\{x:\|x\|_2\le r\},
+    \qquad
+    Q_2=\{u:\|u\|_\infty\le 1\}=[-1,1]^m,
+    \qquad
+    \hat f(x)=0,
+    \qquad
+    \hat\phi(u)=b^\top u.
+\]
+The final form is
+\[
+    \boxed{
+    \min_{\|x\|_2\le r}
+    \max_{\|u\|_\infty\le 1}
+    \left\{
+        \langle Ax,u\rangle-b^\top u
+    \right\}.
+    }
+\]
 
 
 
