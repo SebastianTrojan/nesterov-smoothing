@@ -1,0 +1,495 @@
+\documentclass[aspectratio=169]{beamer}
+
+\usetheme{Madrid}
+\usecolortheme{default}
+\setbeamertemplate{navigation symbols}{}
+\setbeamertemplate{footline}{%
+  \leavevmode%
+  \hbox{%
+    \begin{beamercolorbox}[wd=\paperwidth,ht=2.25ex,dp=1ex,right]{date in head/foot}%
+      \usebeamerfont{date in head/foot}\insertframenumber{} / \inserttotalframenumber\hspace*{2ex}%
+    \end{beamercolorbox}%
+  }%
+}
+
+\usepackage[utf8]{inputenc}
+\usepackage[T1]{fontenc}
+\usepackage{amsmath,amssymb,mathtools}
+\usepackage{booktabs}
+\usepackage{graphicx}
+\usepackage{array}
+
+\title[Nesterov smoothing]{Nesterov's Smooth Minimization of Non-Smooth Functions}
+\subtitle{Theory, implementation, and computational experiments}
+\author{Micha\l{} Szewczak \and Sebastian Trojan}
+\date{\today}
+
+\newcommand{\maybeimage}[2][]{%
+  \IfFileExists{#2}{\includegraphics[#1]{#2}}{%
+    \IfFileExists{results/plots/#2}{\includegraphics[#1]{results/plots/#2}}{%
+      \fbox{\begin{minipage}[c][0.35\textheight][c]{0.8\textwidth}\centering Missing image: \texttt{\detokenize{#2}}\end{minipage}}%
+    }%
+  }%
+}
+
+\begin{document}
+
+% 1
+\begin{frame}
+  \titlepage
+  \vspace{-1em}
+  \begin{center}
+    \small Based on Yurii Nesterov, \emph{Smooth minimization of non-smooth functions}, 2005.
+  \end{center}
+\end{frame}
+
+% 2
+\begin{frame}{Motivation}
+  Many convex optimization problems are non-smooth because their objectives contain maxima, norms, or absolute values.
+
+  \vspace{0.6em}
+  Classical subgradient methods for non-smooth convex optimization have a worst-case rate of order
+  \[
+      O(1/\varepsilon^2).
+  \]
+
+  Nesterov's smoothing method uses the max-structure of the objective to construct a smooth approximation. After smoothing, an accelerated first-order method can be applied, leading to the improved complexity
+  \[
+      O(1/\varepsilon).
+  \]
+
+  \vspace{0.3em}
+  The price is a trade-off: a smaller smoothing parameter gives a more accurate approximation, but a harder smooth problem.
+\end{frame}
+
+% 3
+\begin{frame}{Structured problem class}
+  The original problem is
+  \[
+      f^*=\min_{x\in Q_1}f(x),
+  \]
+  where
+  \[
+      f(x)=\hat f(x)+\max_{u\in Q_2}\{\langle Ax,u\rangle-\hat\phi(u)\}.
+  \]
+
+  \vspace{0.5em}
+  \begin{itemize}
+    \item $x$ is the primal variable.
+    \item $u$ is the dual variable.
+    \item $\hat f(x)$ is the smooth part of the objective.
+    \item In the implemented examples, $\hat f(x)=0$.
+    \item The non-smoothness comes from the maximization over $u$.
+  \end{itemize}
+\end{frame}
+
+% 4
+\begin{frame}{Smoothing the max-term}
+  Choose a strongly convex prox-function $d_2$ on $Q_2$ and define
+  \[
+      f_\mu(x)=\max_{u\in Q_2}\{\langle Ax,u\rangle-\hat\phi(u)-\mu d_2(u)\}.
+  \]
+
+  The full smoothed objective is
+  \[
+      \bar f_\mu(x)=\hat f(x)+f_\mu(x).
+  \]
+
+  The approximation error is bounded by
+  \[
+      \bar f_\mu(x)\le f(x)\le \bar f_\mu(x)+\mu D_2.
+  \]
+
+  \vspace{0.4em}
+  Smaller $\mu$ gives a more accurate approximation, but the smoothed problem becomes harder.
+\end{frame}
+
+% 5
+\begin{frame}{Gradient and smoothness trade-off}
+  The smoothed dual response is
+  \[
+      u_\mu(x)=\arg\max_{u\in Q_2}\{\langle Ax,u\rangle-\hat\phi(u)-\mu d_2(u)\}.
+  \]
+
+  Then
+  \[
+      \nabla f_\mu(x)=A^*u_\mu(x),
+      \qquad
+      \nabla\bar f_\mu(x)=\nabla\hat f(x)+A^*u_\mu(x).
+  \]
+
+  The gradient is Lipschitz continuous with constant
+  \[
+      L_\mu=M+\frac{\|A\|_{1,2}^2}{\mu\sigma_2}.
+  \]
+
+  \vspace{0.4em}
+  This formula explains the central trade-off: decreasing $\mu$ improves the approximation but increases $L_\mu$.
+\end{frame}
+
+% 6
+\begin{frame}{Accelerated minimization}
+\footnotesize
+For a fixed smoothing parameter $\mu$, the method minimizes
+\[
+    \min_{x\in Q_1}\bar f_\mu(x).
+\]
+
+\begin{block}{One accelerated iteration}
+\[
+\begin{array}{rcll}
+ g_k &=& \nabla\bar f_\mu(x_k) & \text{gradient},\\[0.35em]
+ y_k &=& T_{Q_1}(x_k) & \text{local point},\\[0.35em]
+ G_k &=& \displaystyle\sum_{i=0}^{k}\alpha_i g_i & \text{accumulated gradient},\\[0.6em]
+ z_k &=& \displaystyle\arg\min_{x\in Q_1}\left\{\frac{L}{\sigma_1}d_1(x)+\langle G_k,x\rangle\right\} & \text{aggregate point},\\[0.8em]
+ x_{k+1} &=& \displaystyle\frac{2}{k+3}z_k+\frac{k+1}{k+3}y_k & \text{next search point}.
+\end{array}
+\]
+\end{block}
+
+The local point is obtained from the quadratic model
+\[
+T_{Q_1}(x_k)=\arg\min_{y\in Q_1}\left\{\langle g_k,y-x_k\rangle+\frac{L}{2}\|y-x_k\|^2\right\}.
+\]
+\end{frame}
+
+% 7
+\begin{frame}{Primal-dual certificate and complexity}
+  The algorithm builds an averaged dual point
+  \[
+      \hat u=\frac{\sum_{k=0}^{N}\alpha_k u_k}{\sum_{k=0}^{N}\alpha_k},
+      \qquad u_k=u_\mu(x_k),
+  \]
+  and uses $\hat x=y_N$ as the final primal point.
+
+  \vspace{0.4em}
+  By weak duality,
+  \[
+      \phi(\hat u)\le f^*\le f(\hat x),
+  \]
+  so the primal-dual gap
+  \[
+      f(\hat x)-\phi(\hat u)
+  \]
+  certifies the solution quality.
+
+  \vspace{0.4em}
+  For the implemented examples, $M=0$, and the theoretical iteration complexity is
+  \[
+      N=O(1/\varepsilon),
+      \qquad
+      \mu=\frac{\varepsilon}{2D_2}.
+  \]
+\end{frame}
+
+% 8
+\begin{frame}{Problem classes}
+\small
+  \[
+  \textbf{Matrix game:}\qquad
+  \min_{x\in\Delta_n}\max_{u\in\Delta_m}u^\top Ax
+  \]
+
+  \[
+  \textbf{Continuous location:}\qquad
+  \min_{\|x\|_2\le r}\sum_{j=1}^{p}w_j\|x-c_j\|_2
+  \]
+
+  \[
+  \textbf{Maximum of absolute values:}\qquad
+  \min_{\|x\|_2\le r}\max_{1\le j\le m}|a_j^\top x-b_j|
+  \]
+
+  \[
+  \textbf{Sum of absolute values:}\qquad
+  \min_{\|x\|_2\le r}\sum_{j=1}^{m}|a_j^\top x-b_j|
+  \]
+\end{frame}
+
+% 9
+\begin{frame}{Experimental plan}
+  \begin{enumerate}
+    \item Reproduce Nesterov's matrix game experiment.
+    \item Apply the same scheme to the other three examples.
+    \item Test the empirical dependence on $\varepsilon$.
+    \item Compare standard smoothing with a changing-$\mu$ strategy.
+  \end{enumerate}
+
+  \vspace{0.6em}
+  In every experiment, convergence is measured by the certified condition
+  \[
+      f(\hat x)-\phi(\hat u)\le\varepsilon.
+  \]
+\end{frame}
+
+% 10
+\begin{frame}{Experiment 1: matrix game reproduction}
+  Reproduced problem:
+  \[
+      \min_{x\in\Delta_n}\max_{u\in\Delta_m}u^\top Ax,
+      \qquad A_{ij}\sim U[-1,1].
+  \]
+
+  \vspace{0.5em}
+  Tested grid:
+  \begin{itemize}
+    \item $\varepsilon\in\{10^{-2},10^{-3},10^{-4}\}$,
+    \item $m\in\{100,300,1000\}$,
+    \item $n\in\{100,300,1000,3000,10000\}$, with the largest $n$ omitted for $\varepsilon=10^{-4}$.
+  \end{itemize}
+
+  \vspace{0.5em}
+  Each table cell reports iterations / percentage of the predicted iteration bound.
+\end{frame}
+
+% 11
+\begin{frame}{Experiment 1: matrix game results}
+\tiny
+\centering
+$\varepsilon=10^{-2}$\vspace{0.1em}
+
+\resizebox{0.70\textwidth}{!}{%
+\begin{tabular}{lccccc}
+\toprule
+$m\backslash n$ & 100 & 300 & 1000 & 3000 & 10000\\
+\midrule
+100 & 765/42\% & 934/46\% & 1108/49\% & 1187/49\% & 1281/49\%\\
+300 & 690/34\% & 910/40\% & 1126/45\% & 1268/47\% & 1475/51\%\\
+1000 & 761/34\% & 873/35\% & 1086/39\% & 1284/43\% & 1457/46\%\\
+\bottomrule
+\end{tabular}}
+
+\vspace{0.35em}
+$\varepsilon=10^{-3}$\vspace{0.1em}
+
+\resizebox{0.70\textwidth}{!}{%
+\begin{tabular}{lccccc}
+\toprule
+$m\backslash n$ & 100 & 300 & 1000 & 3000 & 10000\\
+\midrule
+100 & 7123/39\% & 8426/41\% & 8928/40\% & 10191/42\% & 10080/39\%\\
+300 & 7337/36\% & 8639/38\% & 10154/40\% & 11302/42\% & 12022/41\%\\
+1000 & 7526/33\% & 8828/35\% & 10157/37\% & 11595/39\% & 14167/44\%\\
+\bottomrule
+\end{tabular}}
+
+\vspace{0.35em}
+$\varepsilon=10^{-4}$\vspace{0.1em}
+
+\resizebox{0.60\textwidth}{!}{%
+\begin{tabular}{lcccc}
+\toprule
+$m\backslash n$ & 100 & 300 & 1000 & 3000\\
+\midrule
+100 & 68505/37\% & 64512/31\% & 77136/34\% & 74024/30\%\\
+300 & 60932/30\% & 78680/34\% & 83844/33\% & 92862/34\%\\
+1000 & 70778/31\% & 77644/31\% & 93346/34\% & 102925/35\%\\
+\bottomrule
+\end{tabular}}
+
+\end{frame}
+
+% 12
+\begin{frame}{Experiment 2: other problem classes}
+  The matrix game experiment was extended to:
+  \begin{itemize}
+    \item continuous location,
+    \item maximum of absolute values,
+    \item sum of absolute values.
+  \end{itemize}
+
+  \vspace{0.5em}
+  In each case the same type of information was recorded:
+  \begin{itemize}
+    \item number of iterations,
+    \item percentage of the theoretical prediction,
+    \item final primal-dual gap,
+    \item runtime.
+  \end{itemize}
+\end{frame}
+
+% 13
+\begin{frame}{Experiment 2: summary tables}
+\tiny
+\centering
+Continuous location\vspace{0.1em}
+
+\resizebox{0.54\textwidth}{!}{%
+\begin{tabular}{lrrrr}
+\toprule
+$\varepsilon$ & Avg. iter. & Max iter. & Avg. \% & Time\\
+\midrule
+$10^{-4}$ & 171599 & 320867 & 30.64\% & 31.8s\\
+$10^{-3}$ & 20525 & 31653 & 43.74\% & 3.86s\\
+$10^{-2}$ & 1988 & 3606 & 36.70\% & 0.35s\\
+\bottomrule
+\end{tabular}}
+
+\vspace{0.15em}
+Maximum of absolute values\vspace{0.1em}
+
+\resizebox{0.54\textwidth}{!}{%
+\begin{tabular}{lrrrr}
+\toprule
+$\varepsilon$ & Avg. iter. & Max iter. & Avg. \% & Time\\
+\midrule
+$10^{-4}$ & 171486 & 249861 & 39.81\% & 10.6s\\
+$10^{-3}$ & 20032 & 33671 & 44.76\% & 1.26s\\
+$10^{-2}$ & 2593 & 3788 & 56.06\% & 0.16s\\
+\bottomrule
+\end{tabular}}
+
+\vspace{0.15em}
+Sum of absolute values\vspace{0.1em}
+
+\resizebox{0.54\textwidth}{!}{%
+\begin{tabular}{lrrrr}
+\toprule
+$\varepsilon$ & Avg. iter. & Max iter. & Avg. \% & Time\\
+\midrule
+$10^{-4}$ & 1198404 & 2711368 & 29.45\% & 54.9s\\
+$10^{-3}$ & 135894 & 284262 & 32.52\% & 6.43s\\
+$10^{-2}$ & 12088 & 27750 & 30.43\% & 0.51s\\
+\bottomrule
+\end{tabular}}
+
+\end{frame}
+
+% 14
+\begin{frame}{Experiment 3: testing the $O(1/\varepsilon)$ behavior}
+  To isolate the dependence on $\varepsilon$, one random instance was fixed for each problem class and solved for
+  \[
+      \varepsilon\in\{10^{-1},5\cdot10^{-2},10^{-2},5\cdot10^{-3},10^{-3},5\cdot10^{-4},10^{-4}\}.
+  \]
+
+  \vspace{0.4em}
+  The theory predicts
+  \[
+      N(\varepsilon)\approx C\frac{1}{\varepsilon}.
+  \]
+
+  \vspace{0.4em}
+  Therefore:
+  \begin{itemize}
+    \item iterations versus $1/\varepsilon$ should be approximately linear,
+    \item the log-log fitted exponent $\hat p$ should be close to $1$.
+  \end{itemize}
+\end{frame}
+
+% 15
+\begin{frame}{Experiment 3: iterations versus $1/\varepsilon$}
+  \centering
+  \maybeimage[height=0.70\textheight]{epsilon_scaling_iterations_vs_inverse_epsilon.png}
+
+  \vspace{0.2em}
+  \small The curves are close to linear; the difference between problems is mainly the constant factor.
+\end{frame}
+
+% 16
+\begin{frame}{Experiment 3: log-log scaling}
+\begin{columns}[T,onlytextwidth]
+  \begin{column}{0.58\textwidth}
+    \centering
+    \maybeimage[width=\linewidth]{epsilon_scaling_loglog.png}
+  \end{column}
+  \begin{column}{0.39\textwidth}
+    \small
+    Empirical power-law model:
+    \[
+        N(\varepsilon)\approx C\varepsilon^{-p}.
+    \]
+    Taking logarithms gives
+    \[
+        \log N=\log C+p\log(1/\varepsilon).
+    \]
+    Therefore $\hat p$ is the slope of the fitted line on the log-log plot. The theory predicts
+    \[
+        p=1.
+    \]
+
+    \vspace{0.2em}
+    \scriptsize
+    \begin{tabular}{lcc}
+    \toprule
+    Problem & $\hat p$ & SE\\
+    \midrule
+    Matrix game & 0.9897 & 0.0096\\
+    Continuous location & 0.9986 & 0.0054\\
+    Max. abs. values & 0.9208 & 0.0042\\
+    Sum abs. values & 0.9649 & 0.0096\\
+    \bottomrule
+    \end{tabular}
+  \end{column}
+\end{columns}
+\end{frame}
+
+% 17
+\begin{frame}{Experiment 4: changing the smoothing parameter}
+\footnotesize
+\textbf{1. Motivation}
+\begin{itemize}
+  \item Standard smoothing uses $\mu_\varepsilon=\varepsilon/(2D_2)$ from the beginning.
+  \item For small $\varepsilon$, this value is small, so the smoothed problem is sharper and harder.
+\end{itemize}
+
+\vspace{0.2em}
+\textbf{2. Method}
+\begin{itemize}
+  \item Start with a larger smoothing parameter and decrease it geometrically:
+  \[
+      \mu_0=c\mu_\varepsilon,
+      \qquad
+      \mu_{t+1}=\rho\mu_t.
+  \]
+  \item Move to the next stage when
+  \[
+      f(\hat x)-\phi(\hat u)\le c_{\mathrm{stage}}\mu_tD_2.
+  \]
+\end{itemize}
+
+\vspace{0.2em}
+\textbf{3. Our parameters}
+\[
+    c=8,
+    \qquad
+    \rho=0.5,
+    \qquad
+    c_{\mathrm{stage}}=1,
+    \qquad
+    8\mu_\varepsilon\to4\mu_\varepsilon\to2\mu_\varepsilon\to\mu_\varepsilon.
+\]
+\end{frame}
+
+% 18
+\begin{frame}{Experiment 4: gap history}
+  \centering
+  \maybeimage[height=0.70\textheight]{mu_gap_history_matrix_game_eps_1e-04.png}
+
+  \vspace{0.2em}
+  \small After reducing $\mu$, the smoothed objective changes and the primal-dual gap can jump upward. In most tested cases, continuation required more iterations.
+\end{frame}
+
+% 19
+\begin{frame}{Conclusions}
+  \begin{itemize}
+    \item The implementation reached the required primal-dual gap on all reported instances.
+    \item Matrix game results reproduce the qualitative behavior from Nesterov's paper.
+    \item The empirical scaling is consistent with the theoretical $O(1/\varepsilon)$ complexity.
+    \item Worst-case iteration bounds were conservative on random instances.
+    \item Practical difficulty depends strongly on the problem structure.
+    \item The tested changing-$\mu$ strategy was usually less efficient than the standard smoothing method.
+  \end{itemize}
+\end{frame}
+
+% 20
+\begin{frame}{Reference}
+  \small
+  \begin{thebibliography}{1}
+  \bibitem{nesterov2005}
+  Yurii Nesterov.
+  \newblock \emph{Smooth minimization of non-smooth functions}.
+  \newblock Mathematical Programming, 103(1):127--152, 2005.
+  \end{thebibliography}
+\end{frame}
+
+\end{document}
