@@ -20,7 +20,6 @@
 \usepackage{array}
 
 \title[Nesterov smoothing]{Nesterov's Smooth Minimization of Non-Smooth Functions}
-\subtitle{Theory, implementation, and computational experiments}
 \author{Micha\l{} Szewczak \and Sebastian Trojan}
 \date{\today}
 
@@ -53,13 +52,14 @@
       O(1/\varepsilon^2).
   \]
 
-  Nesterov's smoothing method uses the max-structure of the objective to construct a smooth approximation. After smoothing, an accelerated first-order method can be applied, leading to the improved complexity
+  Nesterov's smoothing method uses additional max-structure of the objective. It replaces the non-smooth term by a smooth approximation and then applies an accelerated first-order method.
+  The resulting theoretical complexity is improved to
   \[
       O(1/\varepsilon).
   \]
 
   \vspace{0.3em}
-  The price is a trade-off: a smaller smoothing parameter gives a more accurate approximation, but a harder smooth problem.
+  The main trade-off is controlled by the smoothing parameter: smaller $\mu$ gives a more accurate approximation, but a less smooth problem.
 \end{frame}
 
 % 3
@@ -70,45 +70,59 @@
   \]
   where
   \[
-      f(x)=\hat f(x)+\max_{u\in Q_2}\{\langle Ax,u\rangle-\hat\phi(u)\}.
+      f(x)=\hat f(x)+\max_{u\in Q_2}
+      \{\langle Ax,u\rangle-\hat\phi(u)\}.
   \]
 
   \vspace{0.5em}
   \begin{itemize}
     \item $x$ is the primal variable.
-    \item $u$ is the dual variable.
+    \item $u$ is the auxiliary, or dual, variable.
     \item $\hat f(x)$ is the smooth part of the objective.
+    \item $\hat\phi(u)$ is the part of the max-representation depending only on $u$.
     \item In the implemented examples, $\hat f(x)=0$.
-    \item The non-smoothness comes from the maximization over $u$.
   \end{itemize}
+
+  \vspace{0.3em}
+  The non-smoothness comes from the maximization over $u$.
 \end{frame}
 
 % 4
 \begin{frame}{Smoothing the max-term}
-  Choose a strongly convex prox-function $d_2$ on $Q_2$ and define
+  Choose a strongly convex prox-function $d_2$ on $Q_2$, normalized so that
   \[
-      f_\mu(x)=\max_{u\in Q_2}\{\langle Ax,u\rangle-\hat\phi(u)-\mu d_2(u)\}.
+      \min_{u\in Q_2}d_2(u)=0,
+      \qquad
+      D_2=\max_{u\in Q_2}d_2(u).
   \]
 
+  Define the smoothed max-term
+  \[
+      f_\mu(x)=\max_{u\in Q_2}
+      \{\langle Ax,u\rangle-\hat\phi(u)-\mu d_2(u)\}.
+  \]
   The full smoothed objective is
   \[
       \bar f_\mu(x)=\hat f(x)+f_\mu(x).
   \]
 
-  The approximation error is bounded by
+  The approximation error satisfies
   \[
       \bar f_\mu(x)\le f(x)\le \bar f_\mu(x)+\mu D_2.
   \]
-
-  \vspace{0.4em}
-  Smaller $\mu$ gives a more accurate approximation, but the smoothed problem becomes harder.
+  Therefore, choosing
+  \[
+      \mu=\frac{\varepsilon}{2D_2}
+  \]
+  makes the smoothing error at most $\varepsilon/2$.
 \end{frame}
 
 % 5
 \begin{frame}{Gradient and smoothness trade-off}
   The smoothed dual response is
   \[
-      u_\mu(x)=\arg\max_{u\in Q_2}\{\langle Ax,u\rangle-\hat\phi(u)-\mu d_2(u)\}.
+      u_\mu(x)=\arg\max_{u\in Q_2}
+      \{\langle Ax,u\rangle-\hat\phi(u)-\mu d_2(u)\}.
   \]
 
   Then
@@ -118,71 +132,109 @@
       \nabla\bar f_\mu(x)=\nabla\hat f(x)+A^*u_\mu(x).
   \]
 
-  The gradient is Lipschitz continuous with constant
+  The gradient of $\bar f_\mu$ is Lipschitz continuous with constant
   \[
       L_\mu=M+\frac{\|A\|_{1,2}^2}{\mu\sigma_2}.
   \]
 
-  \vspace{0.4em}
-  This formula explains the central trade-off: decreasing $\mu$ improves the approximation but increases $L_\mu$.
+  \vspace{0.3em}
+  Here $M$ is the Lipschitz constant of $\nabla\hat f$, and $\|A\|_{1,2}$ is the operator norm associated with the chosen primal and dual geometries.
+
+  \vspace{0.3em}
+  Decreasing $\mu$ improves approximation accuracy, but increases $L_\mu$.
 \end{frame}
 
 % 6
-\begin{frame}{Accelerated minimization}
-\footnotesize
+\begin{frame}[t]{Accelerated minimization}
+\scriptsize
 For a fixed smoothing parameter $\mu$, the method minimizes
 \[
     \min_{x\in Q_1}\bar f_\mu(x).
 \]
 
+\vspace{-0.5em}
 \begin{block}{One accelerated iteration}
 \[
 \begin{array}{rcll}
- g_k &=& \nabla\bar f_\mu(x_k) & \text{gradient},\\[0.35em]
- y_k &=& T_{Q_1}(x_k) & \text{local point},\\[0.35em]
- G_k &=& \displaystyle\sum_{i=0}^{k}\alpha_i g_i & \text{accumulated gradient},\\[0.6em]
- z_k &=& \displaystyle\arg\min_{x\in Q_1}\left\{\frac{L}{\sigma_1}d_1(x)+\langle G_k,x\rangle\right\} & \text{aggregate point},\\[0.8em]
+ g_k &=& \nabla\bar f_\mu(x_k) & \text{gradient},\\[0.25em]
+ y_k &=& \displaystyle\arg\min_{y\in Q_1}\left\{\langle g_k,y-x_k\rangle+\frac{L_\mu}{2}\|y-x_k\|^2\right\} & \text{local point},\\[0.45em]
+ G_k &=& \displaystyle\sum_{i=0}^{k}\alpha_i g_i,\qquad \alpha_i=\frac{i+1}{2} & \text{accumulated gradient},\\[0.45em]
+ z_k &=& \displaystyle\arg\min_{x\in Q_1}\left\{\frac{L_\mu}{\sigma_1}d_1(x)+\langle G_k,x\rangle\right\} & \text{aggregate point},\\[0.65em]
  x_{k+1} &=& \displaystyle\frac{2}{k+3}z_k+\frac{k+1}{k+3}y_k & \text{next search point}.
 \end{array}
 \]
 \end{block}
 
-The local point is obtained from the quadratic model
-\[
-T_{Q_1}(x_k)=\arg\min_{y\in Q_1}\left\{\langle g_k,y-x_k\rangle+\frac{L}{2}\|y-x_k\|^2\right\}.
-\]
+\vspace{-0.2em}
+$y_k$ uses the current gradient, while $z_k$ uses all gradients accumulated in $G_k$.
 \end{frame}
 
 % 7
-\begin{frame}{Primal-dual certificate and complexity}
+\begin{frame}{Primal-dual certificate}
+\small
   The algorithm builds an averaged dual point
   \[
       \hat u=\frac{\sum_{k=0}^{N}\alpha_k u_k}{\sum_{k=0}^{N}\alpha_k},
       \qquad u_k=u_\mu(x_k),
+      \qquad \hat x=y_N.
   \]
-  and uses $\hat x=y_N$ as the final primal point.
 
-  \vspace{0.4em}
+  The dual lower-bound function is
+  \[
+      \phi(u)=\min_{x\in Q_1}
+      \{\hat f(x)+\langle Ax,u\rangle\}-\hat\phi(u).
+  \]
+
+
+  \vspace{0.3em}
   By weak duality,
   \[
-      \phi(\hat u)\le f^*\le f(\hat x),
+      \phi(\hat u)\le f^*\le f(\hat x).
   \]
-  so the primal-dual gap
+  Therefore the primal-dual gap
   \[
       f(\hat x)-\phi(\hat u)
   \]
   certifies the solution quality.
-
-  \vspace{0.4em}
-  For the implemented examples, $M=0$, and the theoretical iteration complexity is
-  \[
-      N=O(1/\varepsilon),
-      \qquad
-      \mu=\frac{\varepsilon}{2D_2}.
-  \]
 \end{frame}
 
 % 8
+\begin{frame}{Theoretical iteration bound}
+\small
+  Nesterov's estimate gives
+  \[
+      f(\hat x)-\phi(\hat u)
+      \le
+      \frac{4\|A\|_{1,2}}{N+1}
+      \sqrt{\frac{D_1D_2}{\sigma_1\sigma_2}}
+      +
+      \frac{4MD_1}{\sigma_1(N+1)^2}.
+  \]
+
+  In the implemented examples, $\hat f=0$, so $M=0$. Hence
+  \[
+      f(\hat x)-\phi(\hat u)
+      \le
+      \frac{4\|A\|_{1,2}}{N+1}
+      \sqrt{\frac{D_1D_2}{\sigma_1\sigma_2}}.
+  \]
+
+  To guarantee $f(\hat x)-\phi(\hat u)\le\varepsilon$, it is sufficient to take
+  \[
+      N_{\mathrm{pred}}+1=
+      \left\lceil
+      \frac{4\|A\|_{1,2}}{\varepsilon}
+      \sqrt{\frac{D_1D_2}{\sigma_1\sigma_2}}
+      \right\rceil.
+  \]
+
+  Thus the predicted complexity is
+  \[
+      N=O(1/\varepsilon).
+  \]
+\end{frame}
+
+% 9
 \begin{frame}{Problem classes}
 \small
   \[
@@ -206,7 +258,7 @@ T_{Q_1}(x_k)=\arg\min_{y\in Q_1}\left\{\langle g_k,y-x_k\rangle+\frac{L}{2}\|y-x
   \]
 \end{frame}
 
-% 9
+% 10
 \begin{frame}{Experimental plan}
   \begin{enumerate}
     \item Reproduce Nesterov's matrix game experiment.
@@ -222,13 +274,16 @@ T_{Q_1}(x_k)=\arg\min_{y\in Q_1}\left\{\langle g_k,y-x_k\rangle+\frac{L}{2}\|y-x
   \]
 \end{frame}
 
-% 10
+% 11
 \begin{frame}{Experiment 1: matrix game reproduction}
   Reproduced problem:
   \[
       \min_{x\in\Delta_n}\max_{u\in\Delta_m}u^\top Ax,
       \qquad A_{ij}\sim U[-1,1].
   \]
+  Here \(A\in\mathbb{R}^{m\times n}\), \(n\) is the number of column strategies
+  (dimension of \(x\)), and \(m\) is the number of row strategies
+  (dimension of \(u\)).
 
   \vspace{0.5em}
   Tested grid:
@@ -242,7 +297,7 @@ T_{Q_1}(x_k)=\arg\min_{y\in Q_1}\left\{\langle g_k,y-x_k\rangle+\frac{L}{2}\|y-x
   Each table cell reports iterations / percentage of the predicted iteration bound.
 \end{frame}
 
-% 11
+% 12
 \begin{frame}{Experiment 1: matrix game results}
 \tiny
 \centering
@@ -251,11 +306,11 @@ $\varepsilon=10^{-2}$\vspace{0.1em}
 \resizebox{0.70\textwidth}{!}{%
 \begin{tabular}{lccccc}
 \toprule
-$m\backslash n$ & 100 & 300 & 1000 & 3000 & 10000\\
+$m\backslash n$ & 100 & 300 & 1\,000 & 3\,000 & 10\,000\\
 \midrule
-100 & 765/42\% & 934/46\% & 1108/49\% & 1187/49\% & 1281/49\%\\
-300 & 690/34\% & 910/40\% & 1126/45\% & 1268/47\% & 1475/51\%\\
-1000 & 761/34\% & 873/35\% & 1086/39\% & 1284/43\% & 1457/46\%\\
+100 & 765/42\% & 934/46\% & 1\,108/49\% & 1\,187/49\% & 1\,281/49\%\\
+300 & 690/34\% & 910/40\% & 1\,126/45\% & 1\,268/47\% & 1\,475/51\%\\
+1\,000 & 761/34\% & 873/35\% & 1\,086/39\% & 1\,284/43\% & 1\,457/46\%\\
 \bottomrule
 \end{tabular}}
 
@@ -265,11 +320,11 @@ $\varepsilon=10^{-3}$\vspace{0.1em}
 \resizebox{0.70\textwidth}{!}{%
 \begin{tabular}{lccccc}
 \toprule
-$m\backslash n$ & 100 & 300 & 1000 & 3000 & 10000\\
+$m\backslash n$ & 100 & 300 & 1\,000 & 3\,000 & 10\,000\\
 \midrule
-100 & 7123/39\% & 8426/41\% & 8928/40\% & 10191/42\% & 10080/39\%\\
-300 & 7337/36\% & 8639/38\% & 10154/40\% & 11302/42\% & 12022/41\%\\
-1000 & 7526/33\% & 8828/35\% & 10157/37\% & 11595/39\% & 14167/44\%\\
+100 & 7\,123/39\% & 8\,426/41\% & 8\,928/40\% & 10\,191/42\% & 10\,080/39\%\\
+300 & 7\,337/36\% & 8\,639/38\% & 10\,154/40\% & 11\,302/42\% & 12\,022/41\%\\
+1\,000 & 7\,526/33\% & 8\,828/35\% & 10\,157/37\% & 11\,595/39\% & 14\,167/44\%\\
 \bottomrule
 \end{tabular}}
 
@@ -279,36 +334,41 @@ $\varepsilon=10^{-4}$\vspace{0.1em}
 \resizebox{0.60\textwidth}{!}{%
 \begin{tabular}{lcccc}
 \toprule
-$m\backslash n$ & 100 & 300 & 1000 & 3000\\
+$m\backslash n$ & 100 & 300 & 1\,000 & 3\,000\\
 \midrule
-100 & 68505/37\% & 64512/31\% & 77136/34\% & 74024/30\%\\
-300 & 60932/30\% & 78680/34\% & 83844/33\% & 92862/34\%\\
-1000 & 70778/31\% & 77644/31\% & 93346/34\% & 102925/35\%\\
+100 & 68\,505/37\% & 64\,512/31\% & 77\,136/34\% & 74\,024/30\%\\
+300 & 60\,932/30\% & 78\,680/34\% & 83\,844/33\% & 92\,862/34\%\\
+1\,000 & 70\,778/31\% & 77\,644/31\% & 93\,346/34\% & 102\,925/35\%\\
 \bottomrule
 \end{tabular}}
 
 \end{frame}
 
-% 12
+% 13
 \begin{frame}{Experiment 2: other problem classes}
+\small
   The matrix game experiment was extended to:
   \begin{itemize}
-    \item continuous location,
-    \item maximum of absolute values,
-    \item sum of absolute values.
+    \item Continuous location:
+    \(\min_{\|x\|_2\le r}\sum_{j=1}^p w_j\|x-c_j\|_2,\quad c_j\sim \mathrm{Unif}(B_2(0,0.8r)),\ w_j\sim U[0.5,1.5],\ r=1\).\par
+    Grid: \(p\in\{10,50\}\), \(d\in\{2,5\}\) where \(c_j,x\in\mathbb{R}^d\).
+    \item Maximum of absolute values:
+    \(\min_{\|x\|_2\le r}\max_{1\le j\le m}|a_j^\top x-b_j|,\quad A_{ji}, b_j\sim U[-1,1],\ r=1\).\par
+    Grid: \(m\in\{100,300\}\), \(n\in\{50,200\}\) where \(a_j,x\in\mathbb{R}^n\).
+    \item Sum of absolute values:
+    \(\min_{\|x\|_2\le r}\sum_{j=1}^m|a_j^\top x-b_j|,\quad A_{ji}, b_j\sim U[-1,1],\ r=1\).\par
+    Grid: \(m\in\{100,300\}\), \(n\in\{50,200\}\) where \(a_j,x\in\mathbb{R}^n\).
   \end{itemize}
 
   \vspace{0.5em}
-  In each case the same type of information was recorded:
-  \begin{itemize}
-    \item number of iterations,
-    \item percentage of the theoretical prediction,
-    \item final primal-dual gap,
-    \item runtime.
-  \end{itemize}
+  Common accuracy levels:
+  \[
+      \varepsilon\in\{10^{-2},10^{-3},10^{-4}\}.
+  \]
+
 \end{frame}
 
-% 13
+% 14
 \begin{frame}{Experiment 2: summary tables}
 \tiny
 \centering
@@ -319,9 +379,9 @@ Continuous location\vspace{0.1em}
 \toprule
 $\varepsilon$ & Avg. iter. & Max iter. & Avg. \% & Time\\
 \midrule
-$10^{-4}$ & 171599 & 320867 & 30.64\% & 31.8s\\
-$10^{-3}$ & 20525 & 31653 & 43.74\% & 3.86s\\
-$10^{-2}$ & 1988 & 3606 & 36.70\% & 0.35s\\
+$10^{-4}$ & 171\,599 & 320\,867 & 30.64\% & 31.8s\\
+$10^{-3}$ & 20\,525 & 31\,653 & 43.74\% & 3.86s\\
+$10^{-2}$ & 1\,988 & 3\,606 & 36.70\% & 0.35s\\
 \bottomrule
 \end{tabular}}
 
@@ -333,9 +393,9 @@ Maximum of absolute values\vspace{0.1em}
 \toprule
 $\varepsilon$ & Avg. iter. & Max iter. & Avg. \% & Time\\
 \midrule
-$10^{-4}$ & 171486 & 249861 & 39.81\% & 10.6s\\
-$10^{-3}$ & 20032 & 33671 & 44.76\% & 1.26s\\
-$10^{-2}$ & 2593 & 3788 & 56.06\% & 0.16s\\
+$10^{-4}$ & 171\,486 & 249\,861 & 39.81\% & 10.6s\\
+$10^{-3}$ & 20\,032 & 33\,671 & 44.76\% & 1.26s\\
+$10^{-2}$ & 2\,593 & 3\,788 & 56.06\% & 0.16s\\
 \bottomrule
 \end{tabular}}
 
@@ -347,17 +407,17 @@ Sum of absolute values\vspace{0.1em}
 \toprule
 $\varepsilon$ & Avg. iter. & Max iter. & Avg. \% & Time\\
 \midrule
-$10^{-4}$ & 1198404 & 2711368 & 29.45\% & 54.9s\\
-$10^{-3}$ & 135894 & 284262 & 32.52\% & 6.43s\\
-$10^{-2}$ & 12088 & 27750 & 30.43\% & 0.51s\\
+$10^{-4}$ & 1\,198\,404 & 2\,711\,368 & 29.45\% & 54.9s\\
+$10^{-3}$ & 135\,894 & 284\,262 & 32.52\% & 6.43s\\
+$10^{-2}$ & 12\,088 & 27\,750 & 30.43\% & 0.51s\\
 \bottomrule
 \end{tabular}}
 
 \end{frame}
 
-% 14
+% 15
 \begin{frame}{Experiment 3: testing the $O(1/\varepsilon)$ behavior}
-  To isolate the dependence on $\varepsilon$, one random instance was fixed for each problem class and solved for
+  To isolate the dependence on $\varepsilon$, five seeds were used; for each seed, one instance was generated and then kept fixed across all values of $\varepsilon$:
   \[
       \varepsilon\in\{10^{-1},5\cdot10^{-2},10^{-2},5\cdot10^{-3},10^{-3},5\cdot10^{-4},10^{-4}\}.
   \]
@@ -376,7 +436,7 @@ $10^{-2}$ & 12088 & 27750 & 30.43\% & 0.51s\\
   \end{itemize}
 \end{frame}
 
-% 15
+% 16
 \begin{frame}{Experiment 3: iterations versus $1/\varepsilon$}
   \centering
   \maybeimage[height=0.70\textheight]{epsilon_scaling_iterations_vs_inverse_epsilon.png}
@@ -385,7 +445,7 @@ $10^{-2}$ & 12088 & 27750 & 30.43\% & 0.51s\\
   \small The curves are close to linear; the difference between problems is mainly the constant factor.
 \end{frame}
 
-% 16
+% 17
 \begin{frame}{Experiment 3: log-log scaling}
 \begin{columns}[T,onlytextwidth]
   \begin{column}{0.58\textwidth}
@@ -423,7 +483,7 @@ $10^{-2}$ & 12088 & 27750 & 30.43\% & 0.51s\\
 \end{columns}
 \end{frame}
 
-% 17
+% 18
 \begin{frame}{Experiment 4: changing the smoothing parameter}
 \footnotesize
 \textbf{1. Motivation}
@@ -460,7 +520,7 @@ $10^{-2}$ & 12088 & 27750 & 30.43\% & 0.51s\\
 \]
 \end{frame}
 
-% 18
+% 19
 \begin{frame}{Experiment 4: gap history}
   \centering
   \maybeimage[height=0.70\textheight]{mu_gap_history_matrix_game_eps_1e-04.png}
@@ -469,7 +529,7 @@ $10^{-2}$ & 12088 & 27750 & 30.43\% & 0.51s\\
   \small After reducing $\mu$, the smoothed objective changes and the primal-dual gap can jump upward. In most tested cases, continuation required more iterations.
 \end{frame}
 
-% 19
+% 20
 \begin{frame}{Conclusions}
   \begin{itemize}
     \item The implementation reached the required primal-dual gap on all reported instances.
@@ -481,7 +541,7 @@ $10^{-2}$ & 12088 & 27750 & 30.43\% & 0.51s\\
   \end{itemize}
 \end{frame}
 
-% 20
+% 21
 \begin{frame}{Reference}
   \small
   \begin{thebibliography}{1}
