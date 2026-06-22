@@ -186,14 +186,15 @@ def solve_continuous_location(
         if max_iterations < 1:
             raise ValueError("max_iterations must be positive.")
 
-        initial_state = _continuous_location_oracle(city_matrix, weight_vector, initial_x, mu)
-        emit_trace(
-            iteration=0,
-            stage=1,
-            mu_value=mu,
-            objective_value=initial_state.objective_value,
-            dual_points_flat=initial_state.auxiliary,
-        )
+        if trace_callback is not None:
+            initial_state = _continuous_location_oracle(city_matrix, weight_vector, initial_x, mu)
+            emit_trace(
+                iteration=0,
+                stage=1,
+                mu_value=mu,
+                objective_value=initial_state.objective_value,
+                dual_points_flat=initial_state.auxiliary,
+            )
 
         snapshot = run_accelerated_method(
             initial_x=initial_x,

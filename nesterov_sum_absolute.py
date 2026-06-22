@@ -160,14 +160,15 @@ def solve_sum_absolute_values(
         if max_iterations < 1:
             raise ValueError("max_iterations must be positive.")
 
-        initial_state = _sum_absolute_oracle(matrix_value, offset_vector, initial_x, mu)
-        emit_trace(
-            iteration=0,
-            stage=1,
-            mu_value=mu,
-            objective_value=initial_state.objective_value,
-            dual_weights=initial_state.auxiliary,
-        )
+        if trace_callback is not None:
+            initial_state = _sum_absolute_oracle(matrix_value, offset_vector, initial_x, mu)
+            emit_trace(
+                iteration=0,
+                stage=1,
+                mu_value=mu,
+                objective_value=initial_state.objective_value,
+                dual_weights=initial_state.auxiliary,
+            )
 
         snapshot = run_accelerated_method(
             initial_x=initial_x,
